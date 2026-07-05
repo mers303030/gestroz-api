@@ -1,33 +1,12 @@
 import os
-import hashlib
-import jwt
-import datetime
-import httpx
-from fastapi import FastAPI, Request, Depends, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from mangum import Mangum
+from pydantic import BaseModel
+import libsql_experimental as libsql
 
-# ---------- CONFIG ----------
-SECRET_KEY = os.environ.get("SECRET_KEY", "change_this_in_production")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+app = FastAPI(title="Gestroz API", version="1.0.0")
 
-TURSO_HTTP_URL = os.environ.get("TURSO_HTTP_URL")
-TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
-
-if not TURSO_HTTP_URL:
-    raise Exception("Variable TURSO_HTTP_URL manquante")
-if not TURSO_TOKEN:
-    raise Exception("Variable TURSO_AUTH_TOKEN manquante")
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATIC_DIR = os.path.join(BASE_DIR, "api", "static")
-
-# ---------- APP ----------
-app = FastAPI(title="Gestroz API")
-
+# Configuration CORS pour l'interface statique
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -36,136 +15,116 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-security = HTTPBearer()
+# Configuration de la Base de Données
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL")  # libsql://gestroz-db-...
+TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
-# ---------- TURSO VIA HTTPX ----------
-async def turso_query(sql: str, params: list = []):
-    """Exécute une requête SQL sur Turso via l'API HTTP."""
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{TURSO_HTTP_URL}/v1/query",
-            json={"statements": [{"sql": sql, "args": params}]},
-            headers={"Authorization": f"Bearer {TURSO_TOKEN}"},
-            timeout=30.0
-        )
-        response.raise_for_status()
-        return response.json()
+def get_db_connection():
+    """
+    Crée une connexion hybride : Turso en production (Vercel) 
+    ou SQLite local en fallback pour le développement.
+    """
+    if TURSO_URL and TURSO_TOKEN and not TURSO_URL.startswith("file:"):
+        # Mode Production : Connexion distante à Turso
+        return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
+    else:
+        # Mode Local : Utilisation du fichier zaer.db local (créé s'il n'existe pas)
+        os.makedirs("data", exist_ok=True)
+        return libsql.connect(database="data/zaer.db")
 
-# ---------- HASH ----------
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+# Schémas de données Pydantic
+class LoginRequest(BaseModel):
+    code_elevage: str
+    mot_de_passe: str
 
-# ---------- JWT ----------
-def create_token(username: str):
-    expire = datetime.datetime.utcnow() + datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": username, "exp": expire}
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+class UpdatePasswordRequest(BaseModel):
+    code_elevage: str
+    current_password: str
+    new_password: str
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload.get("sub")
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expiré")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Token invalide")
-
-# ---------- INIT ----------
-@app.on_event("startup")
-async def startup():
-    try:
-        await turso_query("""
-            CREATE TABLE IF NOT EXISTS eleveurs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code_elevage TEXT UNIQUE NOT NULL,
-                mot_de_passe_hash TEXT NOT NULL
-            )
-        """)
-        print("✅ Table 'eleveurs' vérifiée")
-        
-        result = await turso_query(
-            "SELECT COUNT(*) FROM eleveurs WHERE code_elevage = ?",
-            ["admin"]
-        )
-        count = result["results"][0]["rows"][0][0]
-        if count == 0:
-            admin_hash = hash_password("admin")
-            await turso_query(
-                "INSERT INTO eleveurs (code_elevage, mot_de_passe_hash) VALUES (?, ?)",
-                ["admin", admin_hash]
-            )
-            print("✅ Compte 'admin' créé")
-    except Exception as e:
-        print(f"⚠️ Erreur startup : {e}")
-
-# ---------- ROUTES ----------
-@app.get("/")
-@app.get("/interface.html")
-async def serve_interface():
-    html_path = os.path.join(STATIC_DIR, "interface.html")
-    if os.path.exists(html_path):
-        return FileResponse(html_path)
-    return JSONResponse(status_code=404, content={"error": "interface.html not found"})
-
-@app.post("/login")
-async def login_post(request: Request):
-    try:
-        body = await request.json()
-        username = body.get("username")
-        password = body.get("password")
-    except:
-        return JSONResponse(status_code=400, content={"error": "JSON invalide"})
-    
-    try:
-        result = await turso_query(
-            "SELECT mot_de_passe_hash FROM eleveurs WHERE code_elevage = ?",
-            [username]
-        )
-        rows = result["results"][0]["rows"]
-        
-        if rows and rows[0][0] == hash_password(password):
-            token = create_token(username)
-            return {"token": token, "message": "Connexion réussie"}
-        else:
-            return JSONResponse(status_code=401, content={"error": "Identifiants incorrects"})
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Erreur base de données: {str(e)}"})
-
-@app.post("/change-password")
-async def change_password(request: Request, username: str = Depends(verify_token)):
-    try:
-        body = await request.json()
-        old_password = body.get("old_password")
-        new_password = body.get("new_password")
-    except:
-        return JSONResponse(status_code=400, content={"error": "JSON invalide"})
-    
-    try:
-        result = await turso_query(
-            "SELECT mot_de_passe_hash FROM eleveurs WHERE code_elevage = ?",
-            [username]
-        )
-        rows = result["results"][0]["rows"]
-        
-        if not rows or rows[0][0] != hash_password(old_password):
-            return JSONResponse(status_code=401, content={"error": "Ancien mot de passe incorrect"})
-        
-        new_hash = hash_password(new_password)
-        await turso_query(
-            "UPDATE eleveurs SET mot_de_passe_hash = ? WHERE code_elevage = ?",
-            [new_hash, username]
-        )
-        return {"message": "Mot de passe mis à jour avec succès"}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Erreur base de données: {str(e)}"})
+# ----------------------------------------------------------------
+# ROUTES DE L'API
+# ----------------------------------------------------------------
 
 @app.get("/health")
-async def health():
+async def health_check():
+    """Route de diagnostic demandée pour valider la chaîne de connexion"""
     try:
-        await turso_query("SELECT 1")
-        return {"status": "healthy", "turso": "connected"}
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # On vérifie la présence et le volume de la table éleveurs
+        cursor.execute("SELECT COUNT(*) FROM eleveurs;")
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        mode = "Turso Cloud" if TURSO_URL else "Local SQLite"
+        return {
+            "status": "healthy",
+            "database_mode": mode,
+            "total_eleveurs": count
+        }
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "unhealthy", "turso": "disconnected", "error": str(e)})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Échec de connexion à la base de données : {str(e)}"
+        )
 
-handler = Mangum(app)
+@app.post("/api/login")
+async def login(payload: LoginRequest):
+    """Vérification des identifiants d'un éleveur"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT mot_de_passe FROM eleveurs WHERE code_elevage = ?;", 
+            (payload.code_elevage,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row and row[0] == payload.mot_de_passe:
+            return {"success": True, "message": "Connexion approuvée"}
+            
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Code élevage ou mot de passe incorrect"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/update-password")
+async def update_password(payload: UpdatePasswordRequest):
+    """Garantit la persistance des modifications de mots de passe sur Turso"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 1. Validation de l'identité et du mot de passe actuel
+        cursor.execute(
+            "SELECT mot_de_passe FROM eleveurs WHERE code_elevage = ?;", 
+            (payload.code_elevage,)
+        )
+        row = cursor.fetchone()
+        
+        if not row or row[0] != payload.current_password:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Le mot de passe actuel est invalide"
+            )
+            
+        # 2. Écriture persistante
+        cursor.execute(
+            "UPDATE eleveurs SET mot_de_passe = ? WHERE code_elevage = ?;",
+            (payload.new_password, payload.code_elevage)
+        )
+        conn.commit()
+        conn.close()
+        
+        return {"success": True, "message": "Mot de passe mis à jour avec succès"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
