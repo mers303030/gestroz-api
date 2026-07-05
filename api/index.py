@@ -15,7 +15,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configuration de la Base de Données
+# Configuration de la Base de Données Turso
 TURSO_URL = os.environ.get("TURSO_DATABASE_URL")  # libsql://gestroz-db-...
 TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
@@ -28,7 +28,7 @@ def get_db_connection():
         # Mode Production : Connexion distante à Turso
         return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
     else:
-        # Mode Local : Utilisation du fichier zaer.db local (créé s'il n'existe pas)
+        # Mode Local : Utilisation du fichier zaer.db local
         os.makedirs("data", exist_ok=True)
         return libsql.connect(database="data/zaer.db")
 
@@ -43,12 +43,13 @@ class UpdatePasswordRequest(BaseModel):
     new_password: str
 
 # ----------------------------------------------------------------
-# ROUTES DE L'API
+# ROUTES DE DIAGNOSTIC (HEALTH CHECK)
 # ----------------------------------------------------------------
 
 @app.get("/health")
+@app.get("/api/health")
 async def health_check():
-    """Route de diagnostic demandée pour valider la chaîne de connexion"""
+    """Route de diagnostic pour valider la chaîne de connexion Turso"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -57,7 +58,7 @@ async def health_check():
         count = cursor.fetchone()[0]
         conn.close()
         
-        mode = "Turso Cloud" if TURSO_URL else "Local SQLite"
+        mode = "Turso Cloud" if (TURSO_URL and TURSO_TOKEN) else "Local SQLite"
         return {
             "status": "healthy",
             "database_mode": mode,
@@ -68,6 +69,10 @@ async def health_check():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Échec de connexion à la base de données : {str(e)}"
         )
+
+# ----------------------------------------------------------------
+# ROUTES APPLICATIVES (ÉLEVEURS)
+# ----------------------------------------------------------------
 
 @app.post("/api/login")
 async def login(payload: LoginRequest):
