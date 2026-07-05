@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from mangum import Mangum
-from libsql_experimental import create_client
+from libsql_client import create_client
 
 # ---------- CONFIG ----------
 SECRET_KEY = os.environ.get("SECRET_KEY", "change_this_in_production")
@@ -38,7 +38,6 @@ security = HTTPBearer()
 
 # ---------- TURSO ----------
 def get_db():
-    """Retourne une connexion Turso."""
     try:
         client = create_client(TURSO_URL, auth_token=TURSO_TOKEN)
         return client
