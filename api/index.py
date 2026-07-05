@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, HTTPException, status, Request
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import libsql_experimental as libsql
@@ -16,14 +16,11 @@ app.add_middleware(
 )
 
 # Configuration de la Base de Données Turso
-TURSO_URL = os.environ.get("TURSO_DATABASE_URL")  # libsql://gestroz-db-...
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
 TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
 def get_db_connection():
-    """
-    Crée une connexion hybride : Turso en production (Vercel) 
-    ou SQLite local en fallback pour le développement.
-    """
+    """Connexion hybride Cloud Turso / Local SQLite"""
     if TURSO_URL and TURSO_TOKEN and not TURSO_URL.startswith("file:"):
         return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
     else:
@@ -41,33 +38,14 @@ class UpdatePasswordRequest(BaseModel):
     new_password: str
 
 # ----------------------------------------------------------------
-# MIDDLEWARE DE ROUTAGE (Anti-404 Vercel)
-# ----------------------------------------------------------------
-@app.middleware("http")
-async def clean_vercel_routing_prefix(request: Request, call_next):
-    """
-    Vercel réécrit parfois les requêtes en ajoutant /api ou /api/index.py.
-    Ce middleware nettoie le chemin à la volée pour que FastAPI s'y retrouve toujours.
-    """
-    path = request.url.path
-    if path.startswith("/api/index.py"):
-        request.scope["path"] = path.replace("/api/index.py", "")
-    elif path.startswith("/api"):
-        request.scope["path"] = path.replace("/api", "")
-        
-    # Sécurité supplémentaire : s'assurer qu'un chemin vide pointe bien sur la racine
-    if not request.scope["path"]:
-        request.scope["path"] = "/"
-        
-    return await call_next(request)
-
-# ----------------------------------------------------------------
-# ROUTES APPLICATIVES (Accessibles avec ou sans préfixe /api)
+# ROUTES DE DIAGNOSTIC (Multi-chemins pour parer les réécritures Vercel)
 # ----------------------------------------------------------------
 
 @app.get("/health")
+@app.get("/api/health")
+@app.get("/api/index.py/health")
 async def health_check():
-    """Route de diagnostic pour valider la chaîne de connexion Turso"""
+    """Route de diagnostic globale"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -87,9 +65,13 @@ async def health_check():
             detail=f"Échec de connexion à la base de données : {str(e)}"
         )
 
+# ----------------------------------------------------------------
+# ROUTES APPLICATIVES
+# ----------------------------------------------------------------
+
 @app.post("/login")
+@app.post("/api/login")
 async def login(payload: LoginRequest):
-    """Vérification des identifiants d'un éleveur"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -113,13 +95,12 @@ async def login(payload: LoginRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/update-password")
+@app.post("/api/update-password")
 async def update_password(payload: UpdatePasswordRequest):
-    """Garantit la persistance des modifications de mots de passe sur Turso"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 1. Validation de l'identité et du mot de passe actuel
         cursor.execute(
             "SELECT mot_de_passe FROM eleveurs WHERE code_elevage = ?;", 
             (payload.code_elevage,)
@@ -133,7 +114,6 @@ async def update_password(payload: UpdatePasswordRequest):
                 detail="Le mot de passe actuel est invalide"
             )
             
-        # 2. Écriture persistante
         cursor.execute(
             "UPDATE eleveurs SET mot_de_passe = ? WHERE code_elevage = ?;",
             (payload.new_password, payload.code_elevage)
