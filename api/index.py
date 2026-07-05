@@ -6,7 +6,7 @@ import libsql_experimental as libsql
 
 app = FastAPI(title="Gestroz API", version="1.0.0")
 
-# Configuration CORS pour l'interface statique
+# Configuration CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,14 +20,12 @@ TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
 TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
 def get_db_connection():
-    """Connexion hybride Cloud Turso / Local SQLite"""
     if TURSO_URL and TURSO_TOKEN and not TURSO_URL.startswith("file:"):
         return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
     else:
         os.makedirs("data", exist_ok=True)
         return libsql.connect(database="data/zaer.db")
 
-# Schémas de données Pydantic
 class LoginRequest(BaseModel):
     code_elevage: str
     mot_de_passe: str
@@ -38,12 +36,12 @@ class UpdatePasswordRequest(BaseModel):
     new_password: str
 
 # ----------------------------------------------------------------
-# ROUTES DE DIAGNOSTIC (Multi-chemins pour parer les réécritures Vercel)
+# ROUTES DE DIAGNOSTIC
 # ----------------------------------------------------------------
 
+@app.get("/")
 @app.get("/health")
 @app.get("/api/health")
-@app.get("/api/index.py/health")
 async def health_check():
     """Route de diagnostic globale"""
     try:
