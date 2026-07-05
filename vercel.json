@@ -1,5 +1,5 @@
 {
-  "devCommand": "uvicorn api.index:app --reload",
+  "version": 2,
   "builds": [
     {
       "src": "api/index.py",
@@ -8,11 +8,11 @@
   ],
   "routes": [
     {
-      "src": "/api/(.*)",
+      "src": "/health",
       "dest": "api/index.py"
     },
     {
-      "src": "/health",
+      "src": "/api/(.*)",
       "dest": "api/index.py"
     },
     {
