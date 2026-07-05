@@ -1,0 +1,338 @@
+# ui/widgets/dashboard_tables.py
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QPushButton, QFileDialog, QMessageBox, QLabel
+from PySide6.QtCore import Qt
+import csv
+import os
+from database.db_session import SessionLocal
+from database.models import Eleveur, Animal, Naissance, Sevrage, Croissance, Vente, Mortalite, Aliment, Distribution, Parcelle, FicheCulturale
+from datetime import date
+from sqlalchemy import func
+
+class DashboardTables(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_ui()
+        self.load_real_data()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
+
+        style_table = """
+            QTableWidget {
+                gridline-color: #D1D5DB;
+                border: 1px solid #E5E7EB;
+            }
+            QTableWidget::item {
+                border-bottom: 1px solid #E5E7EB;
+                border-right: 1px solid #E5E7EB;
+                padding: 10px 6px;
+            }
+            QHeaderView::section {
+                background-color: #F3F4F6;
+                color: #2D3748;
+                font-weight: 600;
+                padding: 8px;
+                border: none;
+                border-right: 1px solid #E5E7EB;
+                border-bottom: 1px solid #E5E7EB;
+            }
+        """
+
+        # Onglets existants (Éleveurs, Élevages, Zootechnie, Performances, Commerce)
+        self.tables = {}
+        for title in ["Éleveurs", "Élevages", "Zootechnie", "Performances", "Commerce"]:
+            tab = QWidget()
+            tab_layout = QVBoxLayout(tab)
+            table = QTableWidget(0, 2)
+            table.setHorizontalHeaderLabels(["Caractéristique", "Valeur"])
+            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
+            table.setColumnWidth(1, 220)
+            table.setAlternatingRowColors(True)
+            table.setStyleSheet(style_table)
+            tab_layout.addWidget(table)
+            self.tabs.addTab(tab, title)
+            self.tables[title] = table
+
+        # Nouvel onglet Agriculture
+        self.agriculture_tab = QWidget()
+        agri_layout = QVBoxLayout(self.agriculture_tab)
+        self.agri_table = QTableWidget(0, 2)
+        self.agri_table.setHorizontalHeaderLabels(["Indicateur", "Valeur"])
+        self.agri_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.agri_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.agri_table.setColumnWidth(1, 220)
+        self.agri_table.setAlternatingRowColors(True)
+        self.agri_table.setStyleSheet(style_table)
+        agri_layout.addWidget(self.agri_table)
+        self.tabs.addTab(self.agriculture_tab, "🌾 Agriculture")
+
+        # Bouton d'export
+        btn_export = QPushButton("📁 Exporter toutes les données (CSV)")
+        btn_export.clicked.connect(self.export_all_data)
+        layout.addWidget(btn_export)
+
+    def set_table_data(self, title, data):
+        table = self.tables.get(title)
+        if not table:
+            return
+        table.setRowCount(len(data))
+        for row, (key, val) in enumerate(data):
+            table.setItem(row, 0, QTableWidgetItem(str(key)))
+            item_val = QTableWidgetItem(str(val))
+            item_val.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            table.setItem(row, 1, item_val)
+        table.resizeRowsToContents()
+
+    def load_real_data(self):
+        db = SessionLocal()
+        annee_actuelle = str(date.today().year)
+
+        # --- 1. Onglet Éleveurs (identique) ---
+        nb_eleveurs = db.query(Eleveur).count()
+        ages = db.query(Eleveur.date_naissance).all()
+        ages_val = []
+        for (dnaiss,) in ages:
+            if dnaiss and '-' in dnaiss:
+                try:
+                    an_naiss = int(dnaiss.split('-')[0])
+                    age = date.today().year - an_naiss
+                    if 0 < age < 100:
+                        ages_val.append(age)
+                except:
+                    pass
+        age_moy = sum(ages_val)/len(ages_val) if ages_val else 0
+        age_max = max(ages_val) if ages_val else 0
+        age_min = min(ages_val) if ages_val else 0
+        niveaux = db.query(Eleveur.niveau_scolaire, func.count(Eleveur.code_elevage)).group_by(Eleveur.niveau_scolaire).all()
+        niveaux_dict = dict(niveaux)
+        eleveurs_data = [
+            ("Nombre d'éleveurs", nb_eleveurs),
+            ("Âge moyen", f"{age_moy:.1f} ans"),
+            ("Âge maximum", f"{age_max} ans"),
+            ("Âge minimum", f"{age_min} ans"),
+            ("Niveau Primaire", niveaux_dict.get("Primaire", 0)),
+            ("Niveau Secondaire", niveaux_dict.get("Secondaire", 0)),
+            ("Niveau Supérieur", niveaux_dict.get("Supérieur", 0)),
+        ]
+        self.set_table_data("Éleveurs", eleveurs_data)
+
+        # --- 2. Onglet Élevages (animaux) ---
+        effectifs = {}
+        jeunes = db.query(Naissance).filter(Naissance.actif == True).count()
+        if jeunes > 0:
+            effectifs["Jeune"] = jeunes
+        categories = db.query(Animal.categorie, func.count(Animal.id)).filter(Animal.actif == True).group_by(Animal.categorie).all()
+        for cat, cnt in categories:
+            effectifs[cat] = effectifs.get(cat, 0) + cnt
+        effectifs_data = [(k, v) for k, v in effectifs.items()]
+        effectifs_data.sort(key=lambda x: x[1], reverse=True)
+        total = sum(effectifs.values())
+        effectifs_data.append(("Total", total))
+        self.set_table_data("Élevages", effectifs_data)
+
+        # --- 3. Onglet Zootechnie (reproduction) ---
+        # Âge au premier vêlage
+        ages_velage = []
+        naissances_mere = {}
+        for n in db.query(Naissance).filter(Naissance.mere_boucle != None).all():
+            mere = db.query(Animal).filter(Animal.numero_boucle == n.mere_boucle).first()
+            if mere and mere.date_naissance:
+                try:
+                    an_naiss = int(mere.date_naissance.split('-')[0])
+                    an_vel = int(n.date_naissance.split('-')[0])
+                    age = an_vel - an_naiss
+                    if 0 < age < 15:
+                        ages_velage.append(age)
+                except:
+                    pass
+        age_velage_moy = sum(ages_velage)/len(ages_velage) if ages_velage else 0
+        # Intervalle entre vêlages
+        intervalles = []
+        from collections import defaultdict
+        naissances_mere = defaultdict(list)
+        for n in db.query(Naissance).filter(Naissance.mere_boucle != None).all():
+            naissances_mere[(n.code_elevage, n.mere_boucle)].append(n.date_naissance)
+        for key, dates in naissances_mere.items():
+            dates.sort()
+            for i in range(1, len(dates)):
+                try:
+                    d1 = int(dates[i-1].split('-')[0])*12 + int(dates[i-1].split('-')[1])
+                    d2 = int(dates[i].split('-')[0])*12 + int(dates[i].split('-')[1])
+                    intervalles.append(d2 - d1)
+                except:
+                    pass
+        intervalle_moy = sum(intervalles)/len(intervalles) if intervalles else 0
+        zootech_data = [
+            ("Âge au premier vêlage (moyenne)", f"{age_velage_moy:.1f} mois" if age_velage_moy else "N/D"),
+            ("Intervalle entre vêlages (moyenne)", f"{intervalle_moy:.1f} mois" if intervalle_moy else "N/D"),
+            ("Âge à l'intégration (moyenne)", "N/D"),
+            ("Âge à la réforme (moyenne)", "N/D"),
+        ]
+        self.set_table_data("Zootechnie", zootech_data)
+
+        # --- 4. Onglet Performances (poids, GMQ) ---
+        poids_naiss_moy = db.query(func.avg(Naissance.poids_naissance)).filter(Naissance.poids_naissance != None).scalar()
+        ages_sevrage = []
+        for n in db.query(Naissance).filter(Naissance.sevre == True, Naissance.date_naissance != None, Naissance.date_sevrage != None).all():
+            try:
+                d_naiss = date(*map(int, n.date_naissance.split('-')))
+                d_sev = date(*map(int, n.date_sevrage.split('-')))
+                ages_sevrage.append((d_sev - d_naiss).days)
+            except:
+                pass
+        age_sevrage_moy = sum(ages_sevrage)/len(ages_sevrage) if ages_sevrage else 0
+        poids_sevrage_moy = db.query(func.avg(Naissance.poids_sevrage)).filter(Naissance.poids_sevrage != None).scalar()
+        gmq_moy = db.query(func.avg(Naissance.gmq_naissance_sevrage)).filter(Naissance.gmq_naissance_sevrage != None).scalar()
+        perf_data = [
+            ("Poids naissance (moyenne)", f"{poids_naiss_moy:.1f} kg" if poids_naiss_moy else "N/D"),
+            ("Âge sevrage (moyenne)", f"{age_sevrage_moy:.0f} jours" if age_sevrage_moy else "N/D"),
+            ("Poids sevrage (moyenne)", f"{poids_sevrage_moy:.1f} kg" if poids_sevrage_moy else "N/D"),
+            ("GMQ N-S (moyenne)", f"{gmq_moy:.2f} kg/j" if gmq_moy else "N/D"),
+        ]
+        self.set_table_data("Performances", perf_data)
+
+        # --- 5. Onglet Commerce (ventes) ---
+        ventes_animal = db.query(Vente.prix_vente, Animal.categorie).join(Animal, (Animal.code_elevage == Vente.code_elevage) & (Animal.numero_boucle == Vente.numero_boucle)).all()
+        ventes_jeune = db.query(Vente.prix_vente).join(Naissance, (Naissance.code_elevage == Vente.code_elevage) & (Naissance.numero_boucle == Vente.numero_boucle)).all()
+        prix_par_cat = {}
+        for prix, cat in ventes_animal:
+            prix_par_cat.setdefault(cat, []).append(prix)
+        if ventes_jeune:
+            prix_par_cat["Jeune"] = [p for (p,) in ventes_jeune]
+        commerce_data = []
+        for cat, prix_list in prix_par_cat.items():
+            moy = sum(prix_list)/len(prix_list)
+            commerce_data.append((f"{cat} - Prix moyen", f"{moy:.0f} DH"))
+        commerce_data.sort()
+        self.set_table_data("Commerce", commerce_data)
+
+        # --- 6. Nouvel onglet Agriculture ---
+        # Nombre de parcelles, surface totale, cultures, rendements
+        parcelles = db.query(Parcelle).all()
+        nb_parcelles = len(parcelles)
+        surface_totale = sum(p.surface_ha for p in parcelles)
+        # Cultures principales (les plus fréquentes)
+        cultures = db.query(FicheCulturale.culture, func.count(FicheCulturale.id)).group_by(FicheCulturale.culture).all()
+        cultures_str = ", ".join([f"{c or 'ND'} ({nb})" for c, nb in cultures[:3]]) if cultures else "Aucune"
+        # Rendements moyens (grain, paille, foin)
+        rendement_grain_moy = db.query(func.avg(FicheCulturale.rendement_grain)).filter(FicheCulturale.rendement_grain != None).scalar()
+        rendement_paille_moy = db.query(func.avg(FicheCulturale.rendement_paille)).filter(FicheCulturale.rendement_paille != None).scalar()
+        rendement_foin_moy = db.query(func.avg(FicheCulturale.rendement_foin)).filter(FicheCulturale.rendement_foin != None).scalar()
+        # Nombre d'itinéraires culturaux
+        nb_fiches = db.query(FicheCulturale).count()
+        # Année de la dernière récolte
+        derniere_recolte = db.query(FicheCulturale.date_recolte).filter(FicheCulturale.date_recolte != None).order_by(FicheCulturale.date_recolte.desc()).first()
+        derniere_recolte_str = derniere_recolte[0] if derniere_recolte else "N/D"
+        agri_data = [
+            ("Nombre de parcelles", nb_parcelles),
+            ("Surface totale cultivée (ha)", f"{surface_totale:.2f}"),
+            ("Cultures principales", cultures_str),
+            ("Rendement grain moyen (t/ha)", f"{rendement_grain_moy:.2f}" if rendement_grain_moy else "N/D"),
+            ("Rendement paille moyen (t/ha)", f"{rendement_paille_moy:.2f}" if rendement_paille_moy else "N/D"),
+            ("Rendement foin/ensilage moyen (t/ha)", f"{rendement_foin_moy:.2f}" if rendement_foin_moy else "N/D"),
+            ("Nombre d'itinéraires culturaux", nb_fiches),
+            ("Dernière récolte enregistrée", derniere_recolte_str),
+        ]
+        self.agri_table.setRowCount(len(agri_data))
+        for row, (key, val) in enumerate(agri_data):
+            self.agri_table.setItem(row, 0, QTableWidgetItem(str(key)))
+            item_val = QTableWidgetItem(str(val))
+            item_val.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.agri_table.setItem(row, 1, item_val)
+        self.agri_table.resizeRowsToContents()
+
+        db.close()
+
+    # --- Export (inchangé) ---
+    def export_table_to_csv(self, queryset, filename, headers):
+        try:
+            with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                for obj in queryset:
+                    row = [getattr(obj, attr, '') for attr in headers if hasattr(obj, attr)]
+                    writer.writerow(row)
+            return True
+        except Exception as e:
+            print(f"Erreur export {filename} : {e}")
+            return False
+
+    def export_all_data(self):
+        folder = QFileDialog.getExistingDirectory(self, "Choisir le dossier d'export", "")
+        if not folder:
+            return
+        db = SessionLocal()
+        success = True
+        try:
+            # Éleveurs
+            qs = db.query(Eleveur).all()
+            ok = self.export_table_to_csv(qs, os.path.join(folder, "eleveurs.csv"),
+                                          ['code_elevage', 'nom', 'prenom', 'date_naissance', 'niveau_scolaire', 'cnie', 'telephone', 'commune'])
+            if not ok: success = False
+            # Animaux
+            qs = db.query(Animal).all()
+            ok = self.export_table_to_csv(qs, os.path.join(folder, "animaux.csv"),
+                                          ['numero_boucle', 'categorie', 'sexe', 'date_naissance', 'code_elevage', 'poids_naissance',
+                                           'mere_boucle', 'pere_boucle', 'race', 'origine', 'date_entree', 'actif'])
+            if not ok: success = False
+            # Naissances
+            qs = db.query(Naissance).all()
+            ok = self.export_table_to_csv(qs, os.path.join(folder, "naissances.csv"),
+                                          ['id', 'code_elevage', 'mere_boucle', 'date_naissance', 'sexe', 'poids_naissance', 'numero_boucle'])
+            if not ok: success = False
+            # Sevrages
+            qs = db.query(Sevrage).all()
+            ok = self.export_table_to_csv(qs, os.path.join(folder, "sevrages.csv"),
+                                          ['id', 'code_elevage', 'numero_boucle', 'date_sevrage', 'poids_sevrage', 'gmq_naissance_sevrage'])
+            if not ok: success = False
+            # Croissances
+            qs = db.query(Croissance).all()
+            ok = self.export_table_to_csv(qs, os.path.join(folder, "croissances.csv"),
+                                          ['id', 'code_elevage', 'numero_boucle', 'date_pesee', 'poids', 'gmq_post_sevrage'])
+            if not ok: success = False
+            # Ventes
+            qs = db.query(Vente).all()
+            ok = self.export_table_to_csv(qs, os.path.join(folder, "ventes.csv"),
+                                          ['id', 'code_elevage', 'numero_boucle', 'date_vente', 'prix_vente', 'lieu_vente', 'poids_vente'])
+            if not ok: success = False
+            # Mortalités
+            qs = db.query(Mortalite).all()
+            ok = self.export_table_to_csv(qs, os.path.join(folder, "mortalites.csv"),
+                                          ['id', 'code_elevage', 'numero_boucle', 'date_deces', 'cause_deces'])
+            if not ok: success = False
+            # Aliments
+            qs = db.query(Aliment).all()
+            ok = self.export_table_to_csv(qs, os.path.join(folder, "aliments.csv"),
+                                          ['id', 'nom', 'type_aliment', 'matiere_seche', 'prix_kg', 'ufl', 'ufv', 'pdi'])
+            if not ok: success = False
+            # Distributions
+            qs = db.query(Distribution).all()
+            ok = self.export_table_to_csv(qs, os.path.join(folder, "distributions.csv"),
+                                          ['id', 'code_elevage', 'date_distribution', 'aliment_id', 'quantite_kg', 'categorie_animale', 'observations'])
+            if not ok: success = False
+            # Parcelles
+            qs = db.query(Parcelle).all()
+            ok = self.export_table_to_csv(qs, os.path.join(folder, "parcelles.csv"),
+                                          ['id', 'code_elevage', 'numero_parcelle', 'surface_ha', 'statut_foncier', 'observations'])
+            if not ok: success = False
+            # Fiches culturales
+            qs = db.query(FicheCulturale).all()
+            ok = self.export_table_to_csv(qs, os.path.join(folder, "fiches_culturales.csv"),
+                                          ['id', 'parcelle_id', 'annee', 'culture', 'date_labour', 'moyen_labour', 'date_semis', 'dose_semis',
+                                           'moyen_semis', 'type_engrais_fond', 'dose_engrais_fond', 'desherbage_type', 'desherbage_produit',
+                                           'desherbage_dose', 'desherbage_date', 'engrais_couverture_date', 'engrais_couverture_type',
+                                           'engrais_couverture_dose', 'date_recolte', 'moyen_recolte', 'rendement_grain', 'rendement_paille',
+                                           'rendement_foin', 'observations'])
+            if not ok: success = False
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export : {e}")
+            success = False
+        finally:
+            db.close()
+        if success:
+            QMessageBox.information(self, "Export terminé", f"Toutes les données ont été exportées vers {folder}")
+        else:
+            QMessageBox.warning(self, "Export partiel", "Certains fichiers n'ont pas pu être exportés. Voir la console.")

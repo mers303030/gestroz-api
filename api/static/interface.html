@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestroz - Connexion</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f7fc;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        #message {
+            margin-top: 20px;
+            text-align: center;
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🐂 Gestroz</h1>
+        <form id="loginForm">
+            <label for="username">Code élevage</label>
+            <input type="text" id="username" placeholder="Ex: OLM001" required>
+            
+            <label for="password">Mot de passe</label>
+            <input type="password" id="password" placeholder="••••••" required>
+            
+            <button type="submit">Se connecter</button>
+        </form>
+        <div id="message"></div>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const messageDiv = document.getElementById('message');
+
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    messageDiv.style.color = '#2ecc71';
+                    messageDiv.textContent = '✅ Connexion réussie !';
+                    // Stocke le token pour les futures requêtes
+                    localStorage.setItem('token', data.token);
+                    // Redirige vers le tableau de bord si besoin
+                    // window.location.href = '/dashboard';
+                } else {
+                    messageDiv.style.color = '#e74c3c';
+                    messageDiv.textContent = '❌ ' + (data.error || 'Erreur de connexion');
+                }
+            } catch (err) {
+                messageDiv.style.color = '#e74c3c';
+                messageDiv.textContent = '❌ Erreur réseau';
+            }
+        });
+    </script>
+</body>
+</html>

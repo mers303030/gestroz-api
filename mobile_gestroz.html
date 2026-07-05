@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <title>Gestroz Mobile</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+            padding: 16px;
+            color: #1e293b;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1, h2 {
+            color: #0f172a;
+            margin-bottom: 12px;
+            font-weight: 600;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 8px;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        label {
+            font-weight: 500;
+            display: block;
+            margin-top: 12px;
+            margin-bottom: 4px;
+            font-size: 0.9rem;
+        }
+        input, select, button {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 1rem;
+            background: #f8fafc;
+            transition: border 0.2s;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.3);
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 8px;
+        }
+        button:active {
+            background: #2563eb;
+        }
+        .btn-danger {
+            background: #ef4444;
+        }
+        .btn-danger:active {
+            background: #dc2626;
+        }
+        .btn-success {
+            background: #22c55e;
+        }
+        .btn-success:active {
+            background: #16a34a;
+        }
+        .select-like {
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 10px 12px;
+            width: 100%;
+            font-size: 1rem;
+        }
+        .result-box {
+            background: #f1f5f9;
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+            border: 1px solid #e2e8f0;
+        }
+        .item-list {
+            list-style: none;
+            padding: 0;
+            margin: 8px 0;
+        }
+        .item-list li {
+            padding: 6px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .flex {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .flex button {
+            flex: 1;
+            min-width: 80px;
+        }
+        .status {
+            background: #dbeafe;
+            color: #1e40af;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-size: 0.9rem;
+            display: none;
+        }
+        .status.error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .status.success {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .small {
+            font-size: 0.8rem;
+            color: #64748b;
+        }
+        hr {
+            margin: 20px 0;
+            border: 0;
+            border-top: 1px solid #e2e8f0;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #64748b;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🐑 Gestroz Mobile</h1>
+
+    <!-- État de la connexion -->
+    <div id="apiStatus" class="status">Connexion à l'API...</div>
+
+    <!-- Sélection de l'éleveur -->
+    <div class="card">
+        <h2>📋 Choisir un éleveur</h2>
+        <select id="eleveurSelect" class="select-like">
+            <option value="">-- Chargement des éleveurs --</option>
+        </select>
+        <div class="flex">
+            <button id="btnLoadAnimaux" class="btn-success">Voir les animaux</button>
+            <button id="btnRefreshEleveurs" class="btn-danger">Recharger</button>
+        </div>
+    </div>
+
+    <!-- Affichage des animaux -->
+    <div class="card" id="animauxCard" style="display:none;">
+        <h2>🐄 Animaux</h2>
+        <div id="animauxList" class="result-box">Sélectionnez un éleveur et cliquez sur "Voir les animaux".</div>
+    </div>
+
+    <hr>
+
+    <!-- Enregistrer une naissance -->
+    <div class="card">
+        <h2>🐣 Nouvelle naissance</h2>
+        <label>Code éleveur</label>
+        <input type="text" id="naissanceCodeElevage" placeholder="Ex: OLM001" value="OLM001">
+
+        <label>Mère (boucle)</label>
+        <input type="text" id="naissanceMere" placeholder="Numéro de boucle de la mère" value="MERE123">
+
+        <label>Date de naissance</label>
+        <input type="date" id="naissanceDate" value="2026-07-01">
+
+        <label>Sexe</label>
+        <select id="naissanceSexe">
+            <option value="M">Mâle</option>
+            <option value="F">Femelle</option>
+        </select>
+
+        <label>Race</label>
+        <input type="text" id="naissanceRace" placeholder="Ex: ROZ, OLM" value="ROZ">
+
+        <label>Poids naissance (kg) - optionnel</label>
+        <input type="number" id="naissancePoids" placeholder="Ex: 3.5" step="0.1">
+
+        <label>Père (boucle) - optionnel</label>
+        <input type="text" id="naissancePere" placeholder="Numéro de boucle du père">
+
+        <label>Observations - optionnel</label>
+        <input type="text" id="naissanceObs" placeholder="Remarques">
+
+        <button id="btnEnregistrerNaissance">Enregistrer la naissance</button>
+        <div id="naissanceStatus" class="status"></div>
+    </div>
+
+    <hr>
+
+    <!-- Enregistrer une pesée -->
+    <div class="card">
+        <h2>⚖️ Nouvelle pesée</h2>
+        <label>Code éleveur</label>
+        <input type="text" id="peseeCodeElevage" placeholder="Ex: OLM001" value="OLM001">
+
+        <label>Numéro de boucle de l'animal</label>
+        <input type="text" id="peseeBoucle" placeholder="Ex: 9967" value="9967">
+
+        <label>Date de la pesée</label>
+        <input type="date" id="peseeDate" value="2026-07-01">
+
+        <label>Poids (kg)</label>
+        <input type="number" id="peseePoids" placeholder="Ex: 45.5" step="0.1" value="45.5">
+
+        <button id="btnEnregistrerPesee">Enregistrer la pesée</button>
+        <div id="peseeStatus" class="status"></div>
+    </div>
+
+</div>
+
+<script>
+    // --- Configuration de l'API ---
+    // Pour une tablette sur le même réseau, remplacez localhost par l'adresse IP du PC.
+    // Exemple : const API_BASE = 'http://192.168.1.45:8000';
+    const API_BASE = 'http://localhost:8000';
+
+    // --- Éléments DOM ---
+    const eleveurSelect = document.getElementById('eleveurSelect');
+    const btnLoadAnimaux = document.getElementById('btnLoadAnimaux');
+    const btnRefreshEleveurs = document.getElementById('btnRefreshEleveurs');
+    const animauxList = document.getElementById('animauxList');
+    const animauxCard = document.getElementById('animauxCard');
+    const apiStatus = document.getElementById('apiStatus');
+
+    const naissanceBtn = document.getElementById('btnEnregistrerNaissance');
+    const naissanceStatus = document.getElementById('naissanceStatus');
+    const peseeBtn = document.getElementById('btnEnregistrerPesee');
+    const peseeStatus = document.getElementById('peseeStatus');
+
+    // --- Utilitaires ---
+    function showStatus(el, message, type = 'info') {
+        el.textContent = message;
+        el.className = 'status';
+        if (type === 'error') el.classList.add('error');
+        else if (type === 'success') el.classList.add('success');
+        el.style.display = 'block';
+        setTimeout(() => { el.style.display = 'none'; }, 5000);
+    }
+
+    async function fetchJson(url, options = {}) {
+        const response = await fetch(url, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...(options.headers || {})
+            }
+        });
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(`HTTP ${response.status}: ${text}`);
+        }
+        return response.json();
+    }
+
+    // --- 1. Charger la liste des éleveurs ---
+    async function loadEleveurs() {
+        apiStatus.style.display = 'block';
+        apiStatus.className = 'status';
+        apiStatus.textContent = 'Chargement des éleveurs...';
+        try {
+            const data = await fetchJson(`${API_BASE}/eleveurs`);
+            eleveurSelect.innerHTML = '<option value="">-- Sélectionner un éleveur --</option>';
+            data.forEach(e => {
+                const opt = document.createElement('option');
+                opt.value = e.code_elevage;
+                opt.textContent = `${e.code_elevage} - ${e.nom} ${e.prenom}`;
+                eleveurSelect.appendChild(opt);
+            });
+            apiStatus.className = 'status success';
+            apiStatus.textContent = `✅ ${data.length} éleveurs chargés.`;
+            setTimeout(() => { apiStatus.style.display = 'none'; }, 3000);
+        } catch (err) {
+            apiStatus.className = 'status error';
+            apiStatus.textContent = `❌ Erreur : ${err.message}`;
+            console.error(err);
+        }
+    }
+
+    // --- 2. Charger les animaux d'un éleveur ---
+    async function loadAnimaux(codeElevage) {
+        if (!codeElevage) {
+            animauxList.textContent = 'Veuillez sélectionner un éleveur.';
+            animauxCard.style.display = 'block';
+            return;
+        }
+        animauxCard.style.display = 'block';
+        animauxList.textContent = 'Chargement...';
+        try {
+            const data = await fetchJson(`${API_BASE}/animaux?code_elevage=${encodeURIComponent(codeElevage)}`);
+            if (data.length === 0) {
+                animauxList.innerHTML = '<em>Aucun animal actif pour cet éleveur.</em>';
+            } else {
+                let html = '<ul class="item-list">';
+                data.forEach(a => {
+                    html += `<li><strong>${a.numero_boucle}</strong> - ${a.race} (${a.sexe}) - ${a.categorie} - Né(e) le ${a.date_naissance}</li>`;
+                });
+                html += '</ul>';
+                animauxList.innerHTML = html;
+            }
+        } catch (err) {
+            animauxList.textContent = `❌ Erreur : ${err.message}`;
+            console.error(err);
+        }
+    }
+
+    // --- 3. Enregistrer une naissance ---
+    async function enregistrerNaissance() {
+        const code = document.getElementById('naissanceCodeElevage').value.trim();
+        const mere = document.getElementById('naissanceMere').value.trim();
+        const date = document.getElementById('naissanceDate').value;
+        const sexe = document.getElementById('naissanceSexe').value;
+        const race = document.getElementById('naissanceRace').value.trim();
+        const poids = parseFloat(document.getElementById('naissancePoids').value) || null;
+        const pere = document.getElementById('naissancePere').value.trim() || null;
+        const obs = document.getElementById('naissanceObs').value.trim() || null;
+
+        if (!code || !mere || !date || !sexe || !race) {
+            showStatus(naissanceStatus, 'Veuillez remplir tous les champs obligatoires (Code, Mère, Date, Sexe, Race).', 'error');
+            return;
+        }
+
+        const payload = {
+            code_elevage: code,
+            mere_boucle: mere,
+            date_naissance: date,
+            sexe: sexe,
+            race: race,
+            poids_naissance: poids,
+            pere_boucle: pere,
+            observations: obs
+        };
+
+        naissanceStatus.style.display = 'block';
+        naissanceStatus.className = 'status';
+        naissanceStatus.textContent = 'Envoi en cours...';
+
+        try {
+            const result = await fetchJson(`${API_BASE}/naissances`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+            showStatus(naissanceStatus, `✅ ${result.message} - Numéro de boucle généré : ${result.numero_boucle}`, 'success');
+            // Option : recharger les animaux pour l'éleveur sélectionné
+            const selected = eleveurSelect.value;
+            if (selected) loadAnimaux(selected);
+        } catch (err) {
+            showStatus(naissanceStatus, `❌ Erreur : ${err.message}`, 'error');
+            console.error(err);
+        }
+    }
+
+    // --- 4. Enregistrer une pesée ---
+    async function enregistrerPesee() {
+        const code = document.getElementById('peseeCodeElevage').value.trim();
+        const boucle = document.getElementById('peseeBoucle').value.trim();
+        const date = document.getElementById('peseeDate').value;
+        const poids = parseFloat(document.getElementById('peseePoids').value);
+
+        if (!code || !boucle || !date || isNaN(poids) || poids <= 0) {
+            showStatus(peseeStatus, 'Veuillez remplir tous les champs avec des valeurs valides.', 'error');
+            return;
+        }
+
+        const payload = {
+            code_elevage: code,
+            numero_boucle: boucle,
+            date_pesee: date,
+            poids: poids
+        };
+
+        peseeStatus.style.display = 'block';
+        peseeStatus.className = 'status';
+        peseeStatus.textContent = 'Envoi en cours...';
+
+        try {
+            const result = await fetchJson(`${API_BASE}/croissance`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+            showStatus(peseeStatus, `✅ ${result.message}`, 'success');
+        } catch (err) {
+            showStatus(peseeStatus, `❌ Erreur : ${err.message}`, 'error');
+            console.error(err);
+        }
+    }
+
+    // --- Événements ---
+    btnLoadAnimaux.addEventListener('click', () => {
+        const val = eleveurSelect.value;
+        if (val) loadAnimaux(val);
+        else {
+            animauxList.textContent = 'Veuillez d\'abord sélectionner un éleveur.';
+            animauxCard.style.display = 'block';
+        }
+    });
+
+    btnRefreshEleveurs.addEventListener('click', loadEleveurs);
+
+    naissanceBtn.addEventListener('click', enregistrerNaissance);
+
+    peseeBtn.addEventListener('click', enregistrerPesee);
+
+    // Au chargement, charger les éleveurs
+    window.addEventListener('load', () => {
+        loadEleveurs();
+        // Remplir les champs de formulaire avec des valeurs par défaut si besoin
+        document.getElementById('naissanceCodeElevage').value = 'OLM001';
+        document.getElementById('peseeCodeElevage').value = 'OLM001';
+    });
+
+</script>
+</body>
+</html>

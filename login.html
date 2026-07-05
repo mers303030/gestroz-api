@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gestroz Mobile</title>
+    <style>
+        * { box-sizing: border-box; font-family: Arial, sans-serif; margin: 0; padding: 0; }
+        body { background: #f4f7fc; padding: 0; min-height: 100vh; }
+        .header { background: #1a3a5c; color: white; padding: 16px; text-align: center; position: sticky; top:0; z-index:10; }
+        .header h1 { font-size: 20px; }
+        .menu { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; background: white; padding: 10px; border-bottom: 1px solid #ddd; position: sticky; top: 60px; z-index:9; }
+        .menu button { background: #ecf0f1; border: none; padding: 8px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; color: #2c3e50; cursor: pointer; }
+        .menu button.actif { background: #1a3a5c; color: white; }
+        .content { padding: 16px; padding-bottom: 80px; }
+        .card { background: white; border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .card h3 { margin-bottom: 12px; color: #1a3a5c; border-left: 4px solid #e67e22; padding-left: 10px; }
+        .ligne { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f0f0f0; align-items: center; }
+        .ligne:last-child { border-bottom: none; }
+        .actions button { background: none; border: none; padding: 4px 8px; font-size: 16px; cursor: pointer; }
+        .btn-edit { color: #3498db; }
+        .btn-del { color: #e74c3c; }
+        form input, form select { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; }
+        form button { width: 100%; padding: 14px; background: #27ae60; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer; }
+        .btn-annuler { background: #95a5a6; margin-top: 6px; }
+        .login-box { background: white; padding: 30px; border-radius: 16px; max-width: 400px; margin: 40px auto; }
+        .login-box input { width: 100%; padding: 14px; margin-bottom: 16px; border-radius: 8px; border: 1px solid #ccc; }
+        .login-box button { width: 100%; padding: 14px; background: #e67e22; color: white; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; }
+        .error { color: red; text-align: center; margin-top: 12px; display: none; }
+        .hidden { display: none; }
+        .deco { background: #e74c3c; color: white; border: none; padding: 6px 14px; border-radius: 20px; float: right; font-size: 14px; cursor: pointer; }
+        #app { display: none; }
+        .toast { position: fixed; bottom: 20px; left: 20px; right: 20px; background: #2c3e50; color: white; padding: 16px; border-radius: 16px; text-align: center; z-index: 999; }
+        .toast.success { background: #27ae60; }
+        .toast.error { background: #c0392b; }
+        .info-eleveur { font-size: 14px; color: #ecf0f1; margin-top: 4px; }
+    </style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="loginContainer" class="login-box">
+    <h1 style="text-align:center;">🐑 Gestroz</h1>
+    <input type="text" id="username" placeholder="Code élevage (ex: OLM001)">
+    <input type="password" id="password" placeholder="Mot de passe (code par défaut)">
+    <button onclick="login()">Se connecter</button>
+    <div id="errorMsg" class="error"></div>
+</div>
+
+<!-- Application -->
+<div id="app">
+    <div class="header">
+        <h1>🐑 Gestroz Terrain</h1>
+        <div class="info-eleveur" id="infoHeader">Chargement...</div>
+        <button class="deco" onclick="deconnexion()">Déconnexion</button>
+    </div>
+
+    <!-- Menu -->
+    <div class="menu" id="mainMenu">
+        <button class="actif" data-module="animaux" onclick="chargerModule('animaux')">Animaux</button>
+        <button data-module="naissances" onclick="chargerModule('naissances')">Naissances</button>
+        <button data-module="pesees" onclick="chargerModule('pesees')">Pesées</button>
+        <button data-module="ventes" onclick="chargerModule('ventes')">Ventes</button>
+        <button data-module="mortalites" onclick="chargerModule('mortalites')">Décès</button>
+        <button data-module="sevrages" onclick="chargerModule('sevrages')">Sevrages</button>
+    </div>
+
+    <div class="content" id="moduleContent">
+        <!-- Le contenu est chargé dynamiquement ici -->
+    </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+    // --- Gestion du token ---
+    function getHeaders() {
+        return { 'Authorization': 'Bearer ' + localStorage.getItem('token'), 'Content-Type': 'application/json' };
+    }
+
+    function showToast(msg, type='info') {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = 'toast ' + type;
+        t.classList.remove('hidden');
+        clearTimeout(window.toastTimeout);
+        window.toastTimeout = setTimeout(() => t.classList.add('hidden'), 3500);
+    }
+
+    // --- Connexion ---
+    async function login() {
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value.trim();
+        const err = document.getElementById('errorMsg');
+        err.style.display = 'none';
+        if (!username || !password) { err.textContent = 'Remplissez tous les champs.'; err.style.display = 'block'; return; }
+        try {
+            const res = await fetch('/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+            const data = await res.json();
+            if (!res.ok) { err.textContent = data.detail || 'Erreur'; err.style.display = 'block'; return; }
+            localStorage.setItem('token', data.access_token);
+            localStorage.setItem('username', username);
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('app').style.display = 'block';
+            chargerInfos();
+            chargerModule('animaux');
+        } catch(e) { err.textContent = 'Erreur réseau'; err.style.display = 'block'; }
+    }
+
+    // --- Chargement infos éleveur ---
+    async function chargerInfos() {
+        try {
+            const res = await fetch('/eleveurs', { headers: getHeaders() });
+            const data = await res.json();
+            document.getElementById('infoHeader').innerHTML = `${data.nom} ${data.prenom} · ${data.code_elevage}`;
+        } catch(e) {}
+    }
+
+    // --- Navigation ---
+    function chargerModule(module) {
+        document.querySelectorAll('.menu button').forEach(b => b.classList.remove('actif'));
+        document.querySelector(`.menu button[data-module="${module}"]`).classList.add('actif');
+        const container = document.getElementById('moduleContent');
+        container.innerHTML = '<div style="text-align:center; padding:40px;">Chargement...</div>';
+        chargerListe(module);
+    }
+
+    // --- Chargement des listes et formulaire d'ajout ---
+    async function chargerListe(module) {
+        const container = document.getElementById('moduleContent');
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        try {
+            const res = await fetch(`/${module}`, { headers: getHeaders() });
+            if (!res.ok) throw new Error('Erreur');
+            const data = await res.json();
+
+            let html = `<div class="card"><h3>➕ Ajouter</h3><form id="formAdd" onsubmit="ajouterItem(event, '${module}')">`;
+            const champs = getChamps(module);
+            champs.forEach(c => {
+                html += `<input type="text" id="add_${c}" placeholder="${c.replace(/_/g,' ')}" `;
+                if (c === 'date_naissance' || c === 'date_vente' || c === 'date_pesee' || c === 'date_sevrage' || c === 'date_deces') html += `placeholder="AAAA-MM-JJ"`;
+                html += `>`;
+            });
+            html += `<button type="submit">✅ Enregistrer</button></form></div>`;
+
+            html += `<div class="card"><h3>📋 Liste</h3><div id="listeItems">`;
+            if (data.length === 0) {
+                html += `<div style="color:#7f8c8d; padding:12px;">Aucun enregistrement.</div>`;
+            } else {
+                data.forEach(item => {
+                    html += `<div class="ligne" id="row_${item.id}">`;
+                    html += `<div><strong>${item.numero_boucle || item.id}</strong> `;
+                    if (item.race) html += `<span style="background:#ecf0f1; padding:2px 8px; border-radius:12px;">${item.race}</span>`;
+                    if (item.date_naissance) html += ` ${item.date_naissance}`;
+                    if (item.prix_vente) html += ` ${item.prix_vente} DH`;
+                    if (item.poids) html += ` ${item.poids} kg`;
+                    html += `</div>`;
+                    html += `<div class="actions">
+                        <button class="btn-edit" onclick="editerItem('${module}', ${item.id})">✏️</button>
+                        <button class="btn-del" onclick="supprimerItem('${module}', ${item.id})">🗑️</button>
+                    </div>`;
+                    html += `</div>`;
+                });
+            }
+            html += `</div></div>`;
+
+            container.innerHTML = html;
+
+        } catch(e) {
+            container.innerHTML = `<div class="card" style="color:red;">Erreur de chargement : ${e.message}</div>`;
+        }
+    }
+
+    // --- Définition des champs par module ---
+    function getChamps(module) {
+        const map = {
+            'animaux': ['numero_boucle', 'date_naissance', 'sexe', 'race', 'categorie'],
+            'naissances': ['mere_boucle', 'date_naissance', 'sexe', 'race', 'poids_naissance'],
+            'pesees': ['numero_boucle', 'date_pesee', 'poids'],
+            'ventes': ['numero_boucle', 'date_vente', 'prix_vente', 'lieu_vente', 'poids_vente'],
+            'mortalites': ['numero_boucle', 'date_deces', 'cause_deces'],
+            'sevrages': ['numero_boucle', 'date_sevrage', 'poids_sevrage']
+        };
+        return map[module] || [];
+    }
+
+    // --- AJOUTER ---
+    async function ajouterItem(e, module) {
+        e.preventDefault();
+        const form = e.target;
+        const champs = getChamps(module);
+        const payload = {};
+        champs.forEach(c => {
+            const val = document.getElementById(`add_${c}`).value.trim();
+            if (val) payload[c] = val;
+        });
+        if (Object.keys(payload).length === 0) { showToast('Remplissez au moins un champ.', 'error'); return; }
+
+        try {
+            const res = await fetch(`/${module}`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(payload) });
+            const data = await res.json();
+            if (res.ok) {
+                showToast('✅ Enregistré !', 'success');
+                chargerListe(module);
+            } else {
+                showToast('❌ Erreur: ' + data.detail, 'error');
+            }
+        } catch(e) { showToast('Erreur réseau', 'error'); }
+    }
+
+    // --- SUPPRIMER ---
+    async function supprimerItem(module, id) {
+        if (!confirm('Supprimer cet enregistrement ?')) return;
+        try {
+            const res = await fetch(`/${module}/${id}`, { method: 'DELETE', headers: getHeaders() });
+            if (res.ok) {
+                showToast('🗑️ Supprimé', 'success');
+                chargerListe(module);
+            } else {
+                showToast('❌ Erreur', 'error');
+            }
+        } catch(e) { showToast('Erreur réseau', 'error'); }
+    }
+
+    // --- ÉDITER ---
+    async function editerItem(module, id) {
+        try {
+            const res = await fetch(`/${module}`, { headers: getHeaders() });
+            const data = await res.json();
+            const item = data.find(d => d.id === id);
+            if (!item) { showToast('Élément non trouvé', 'error'); return; }
+
+            const champs = getChamps(module);
+            let html = `<div class="card" style="border:2px solid #3498db;"><h3>✏️ Modifier (ID ${id})</h3><form id="formEdit" onsubmit="updateItem(event, '${module}', ${id})">`;
+            champs.forEach(c => {
+                const val = item[c] || '';
+                html += `<input type="text" id="edit_${c}" placeholder="${c.replace(/_/g,' ')}" value="${val}">`;
+            });
+            html += `<button type="submit" style="background:#3498db;">💾 Mettre à jour</button>`;
+            html += `<button type="button" class="btn-annuler" onclick="chargerListe('${module}')">Annuler</button>`;
+            html += `</form></div>`;
+            
+            const container = document.getElementById('moduleContent');
+            container.innerHTML = html + container.innerHTML;
+
+        } catch(e) { showToast('Erreur', 'error'); }
+    }
+
+    async function updateItem(e, module, id) {
+        e.preventDefault();
+        const champs = getChamps(module);
+        const payload = {};
+        champs.forEach(c => {
+            const val = document.getElementById(`edit_${c}`).value.trim();
+            if (val) payload[c] = val;
+        });
+        if (Object.keys(payload).length === 0) { showToast('Remplissez au moins un champ.', 'error'); return; }
+
+        try {
+            const res = await fetch(`/${module}/${id}`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(payload) });
+            if (res.ok) {
+                showToast('✅ Mis à jour', 'success');
+                chargerListe(module);
+            } else {
+                const err = await res.json();
+                showToast('❌ Erreur: ' + err.detail, 'error');
+            }
+        } catch(e) { showToast('Erreur réseau', 'error'); }
+    }
+
+    // --- DÉCONNEXION ---
+    function deconnexion() {
+        localStorage.clear();
+        location.reload();
+    }
+
+    // --- Vérification session ---
+    if (localStorage.getItem('token')) {
+        document.getElementById('loginContainer').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+        chargerInfos();
+        chargerModule('animaux');
+    }
+</script>
+</body>
+</html>

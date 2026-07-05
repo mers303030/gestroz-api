@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gestroz Mobile</title>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Roboto, system-ui, sans-serif; margin: 0; padding: 0; }
+        body { background: #f4f7fc; padding: 16px; padding-bottom: 80px; }
+        .header { background: #1a3a5c; color: white; padding: 18px; border-radius: 16px; margin-bottom: 20px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .header h1 { font-size: 22px; font-weight: 600; }
+        .header small { font-size: 14px; opacity: 0.8; display: block; margin-top: 4px; }
+        .card { background: white; border-radius: 16px; padding: 18px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .card-title { font-weight: 600; font-size: 16px; color: #1a3a5c; margin-bottom: 12px; border-left: 4px solid #e67e22; padding-left: 10px; }
+        select, input, button { width: 100%; padding: 14px; font-size: 16px; border-radius: 12px; border: 1px solid #ddd; margin-bottom: 10px; background: white; }
+        button { background: #1a3a5c; color: white; font-weight: 600; border: none; cursor: pointer; transition: 0.2s; }
+        button:active { transform: scale(0.96); background: #0e2a44; }
+        .btn-danger { background: #c0392b; }
+        .btn-success { background: #27ae60; }
+        .row { display: flex; gap: 10px; }
+        .row button { flex: 1; }
+        .liste-item { padding: 12px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .liste-item:last-child { border-bottom: none; }
+        .badge { background: #ecf0f1; padding: 4px 10px; border-radius: 20px; font-size: 12px; color: #2c3e50; }
+        .loading { text-align: center; color: #7f8c8d; padding: 20px; }
+        .hidden { display: none; }
+        .toast { position: fixed; bottom: 20px; left: 20px; right: 20px; background: #2c3e50; color: white; padding: 16px; border-radius: 16px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 999; }
+        .toast.success { background: #27ae60; }
+        .toast.error { background: #c0392b; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1>🐑 Gestroz · Terrain</h1>
+    <small>Connexion à l'API PC</small>
+</div>
+<div id="app">
+    <div class="card">
+        <div class="card-title">📍 Sélectionner l'éleveur</div>
+        <select id="eleveurSelect" onchange="chargerAnimaux()">
+            <option value="">Chargement des éleveurs...</option>
+        </select>
+        <div id="animauxContainer">
+            <div class="loading">👆 Choisissez un éleveur pour voir ses animaux</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">🆕 Nouvelle naissance</div>
+        <div class="grid-2">
+            <input type="text" id="mere_boucle" placeholder="Mère (boucle)">
+            <input type="text" id="date_naissance" placeholder="JJ-MM-AAAA">
+        </div>
+        <div class="grid-2">
+            <input type="text" id="sexe" placeholder="Sexe (M/F)">
+            <input type="text" id="race" placeholder="Race (ex: ROZ)">
+        </div>
+        <input type="number" id="poids_naissance" placeholder="Poids naissance (kg)" step="0.1">
+        <button class="btn-success" onclick="enregistrerNaissance()">✅ Enregistrer la naissance</button>
+    </div>
+    <div class="card" id="listeAnimauxCard">
+        <div class="card-title">🐄 Animaux actifs</div>
+        <div id="listeAnimaux"><div class="loading">Aucun animal sélectionné</div></div>
+    </div>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script>
+    const API_BASE = window.location.origin;
+    let currentCodeElevage = "";
+    async function chargerEleveurs() {
+        try {
+            const res = await fetch('/eleveurs');
+            if (!res.ok) throw new Error('Erreur réseau');
+            const data = await res.json();
+            const select = document.getElementById('eleveurSelect');
+            select.innerHTML = '<option value="">-- Choisir un éleveur --</option>';
+            data.sort((a,b) => a.nom.localeCompare(b.nom));
+            data.forEach(e => {
+                const opt = document.createElement('option');
+                opt.value = e.code_elevage;
+                opt.textContent = `${e.code_elevage} - ${e.nom} ${e.prenom}`;
+                select.appendChild(opt);
+            });
+        } catch (err) {
+            document.getElementById('eleveurSelect').innerHTML = '<option value="">❌ Erreur de connexion</option>';
+            showToast("Impossible de contacter l'API. Vérifiez l'IP du PC.", 'error');
+        }
+    }
+    async function chargerAnimaux() {
+        const select = document.getElementById('eleveurSelect');
+        currentCodeElevage = select.value;
+        const container = document.getElementById('animauxContainer');
+        const liste = document.getElementById('listeAnimaux');
+        if (!currentCodeElevage) {
+            container.innerHTML = '<div class="loading">👆 Choisissez un éleveur</div>';
+            return;
+        }
+        container.innerHTML = '<div class="loading">⏳ Chargement des animaux...</div>';
+        try {
+            const res = await fetch(`/animaux?code_elevage=${currentCodeElevage}`);
+            if (!res.ok) throw new Error('Erreur');
+            const data = await res.json();
+            if (data.length === 0) {
+                container.innerHTML = '<div class="loading">🐣 Aucun animal actif pour cet éleveur.</div>';
+                liste.innerHTML = '';
+                return;
+            }
+            let html = '';
+            data.forEach(a => {
+                html += `<div class="liste-item">
+                    <span><strong>${a.numero_boucle}</strong> <span class="badge">${a.race || 'N/R'}</span></span>
+                    <span>${a.categorie || 'N/C'} · ${a.sexe || '?'}</span>
+                </div>`;
+            });
+            liste.innerHTML = html;
+            container.innerHTML = `<div class="loading" style="color:green;">✅ ${data.length} animaux trouvés</div>`;
+        } catch (err) {
+            container.innerHTML = '<div class="loading" style="color:red;">❌ Erreur de chargement</div>';
+        }
+    }
+    async function enregistrerNaissance() {
+        if (!currentCodeElevage) {
+            showToast("Veuillez d'abord sélectionner un éleveur.", 'error');
+            return;
+        }
+        const mere = document.getElementById('mere_boucle').value.trim();
+        const date = document.getElementById('date_naissance').value.trim();
+        const sexe = document.getElementById('sexe').value.trim();
+        const race = document.getElementById('race').value.trim();
+        const poids = document.getElementById('poids_naissance').value.trim();
+        if (!mere || !date || !sexe || !race) {
+            showToast("Remplissez Mère, Date, Sexe et Race.", 'error');
+            return;
+        }
+        let formattedDate = date;
+        if (date.includes('-')) {
+            const parts = date.split('-');
+            if (parts[0].length === 4) formattedDate = date;
+            else if (parts[2].length === 4) formattedDate = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+        }
+        const payload = {
+            code_elevage: currentCodeElevage,
+            mere_boucle: mere,
+            date_naissance: formattedDate,
+            sexe: sexe,
+            race: race,
+            poids_naissance: poids ? parseFloat(poids) : null,
+            pere_boucle: null,
+            type_velage: null,
+            observations: "Saisie terrain mobile"
+        };
+        try {
+            const res = await fetch('/naissances', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (res.ok) {
+                showToast(`✅ Naissance enregistrée ! Numéro : ${result.numero_boucle}`, 'success');
+                document.getElementById('mere_boucle').value = '';
+                document.getElementById('date_naissance').value = '';
+                document.getElementById('sexe').value = '';
+                document.getElementById('race').value = '';
+                document.getElementById('poids_naissance').value = '';
+                chargerAnimaux();
+            } else {
+                showToast(`❌ Erreur : ${result.detail || 'Inconnue'}`, 'error');
+            }
+        } catch (err) {
+            showToast("❌ Problème réseau. Vérifiez la connexion.", 'error');
+        }
+    }
+    function showToast(message, type = 'info') {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.className = 'toast ' + type;
+        toast.classList.remove('hidden');
+        clearTimeout(window.toastTimeout);
+        window.toastTimeout = setTimeout(() => {
+            toast.classList.add('hidden');
+        }, 4000);
+    }
+    chargerEleveurs();
+    document.querySelectorAll('input').forEach(inp => {
+        inp.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') enregistrerNaissance();
+        });
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+CONTEXTE PROJET GESTROZ - REPRISE URGENTE
+
+Bonjour. Je reprends un projet interrompu. Voici l'état exact :
+
+1. Architecture :
+   - API FastAPI (fichier : S:\python-project\zaer\api_gestroz.py)
+   - Base SQLite (fichier : S:\python-project\zaer\data\zaer.db)
+   - Interface web (fichier : S:\python-project\zaer\login.html)
+   - Tunnel ngrok pour accès public (ngrok.exe dans le dossier)
+
+2. Authentification :
+   - Login = code_elevage (ex: OLM001)
+   - Mot de passe par défaut = code_elevage (hashé en MD5)
+   - 475 comptes créés via create_farm_accounts.py
+   - Endpoint /change-password pour changer le mot de passe
+
+3. Fichiers créés :
+   - api_gestroz.py (serveur)
+   - login.html (interface)
+   - create_farm_accounts.py (création des comptes)
+   - generate_qr.py (génération du QR Code)
+   - gestroz_qr.png (QR Code à distribuer)
+
+4. Commandes de lancement :
+   - API : uvicorn api_gestroz:app --host 0.0.0.0 --port 8000 --reload
+   - Tunnel : .\ngrok.exe http 8000 (dans S:\python-project\zaer)
+
+5. URL d'accès :
+   - Page de login : http://[IP_OU_URL_NGROK]/static/login.html
+   - Le QR Code pointe vers cette même URL
+
+6. Ce qui a été validé :
+   - L'API tourne sur le PC (localhost)
+   - Les comptes sont créés
+   - Le QR Code est généré
+
+7. Prochaine étape (si pas encore faite) :
+   - Mettre en place la solution réseau (point d'accès mobile ou ngrok) pour que les éleveurs puissent se connecter depuis leur téléphone.
+
+Question : Peux-tu me rappeler où nous en étions exactement et me donner la prochaine commande à exécuter ?

@@ -1,0 +1,114 @@
+from database.db_session import SessionLocal
+from database.models import Arbre, TraitementArbre
+
+class ArboricultureController:
+    @staticmethod
+    def get_arbres_par_eleveur(code_elevage):
+        db = SessionLocal()
+        result = db.query(Arbre).filter(Arbre.code_elevage == code_elevage).all()
+        db.close()
+        return result
+
+    @staticmethod
+    def ajouter_arbre(data):
+        db = SessionLocal()
+        try:
+            a = Arbre(**data)
+            db.add(a)
+            db.commit()
+            return True, a.id, "Arbre ajouté"
+        except Exception as e:
+            db.rollback()
+            return False, None, str(e)
+        finally:
+            db.close()
+
+    @staticmethod
+    def modifier_arbre(arbre_id, nouvelles_donnees):
+        db = SessionLocal()
+        try:
+            a = db.query(Arbre).filter(Arbre.id == arbre_id).first()
+            if not a:
+                return False, "Arbre introuvable"
+            for key, value in nouvelles_donnees.items():
+                if hasattr(a, key) and value is not None:
+                    setattr(a, key, value)
+            db.commit()
+            return True, "Arbre modifié"
+        except Exception as e:
+            db.rollback()
+            return False, str(e)
+        finally:
+            db.close()
+
+    @staticmethod
+    def supprimer_arbre(arbre_id):
+        db = SessionLocal()
+        try:
+            a = db.query(Arbre).filter(Arbre.id == arbre_id).first()
+            if a:
+                db.query(TraitementArbre).filter(TraitementArbre.arbre_id == arbre_id).delete()
+                db.delete(a)
+                db.commit()
+                return True, "Arbre supprimé"
+            return False, "Arbre introuvable"
+        except Exception as e:
+            db.rollback()
+            return False, str(e)
+        finally:
+            db.close()
+
+    @staticmethod
+    def get_traitements_par_arbre(arbre_id):
+        db = SessionLocal()
+        result = db.query(TraitementArbre).filter(TraitementArbre.arbre_id == arbre_id).order_by(TraitementArbre.date_traitement.desc()).all()
+        db.close()
+        return result
+
+    @staticmethod
+    def ajouter_traitement(data):
+        db = SessionLocal()
+        try:
+            t = TraitementArbre(**data)
+            db.add(t)
+            db.commit()
+            return True, t.id, "Traitement ajouté"
+        except Exception as e:
+            db.rollback()
+            return False, None, str(e)
+        finally:
+            db.close()
+
+    @staticmethod
+    def modifier_traitement(traitement_id, nouvelles_donnees):
+        db = SessionLocal()
+        try:
+            t = db.query(TraitementArbre).filter(TraitementArbre.id == traitement_id).first()
+            if not t:
+                return False, "Traitement introuvable"
+            for key, value in nouvelles_donnees.items():
+                if hasattr(t, key) and value is not None:
+                    setattr(t, key, value)
+            db.commit()
+            return True, "Traitement modifié"
+        except Exception as e:
+            db.rollback()
+            return False, str(e)
+        finally:
+            db.close()
+
+    @staticmethod
+    def supprimer_traitement(traitement_id):
+        db = SessionLocal()
+        try:
+            t = db.query(TraitementArbre).filter(TraitementArbre.id == traitement_id).first()
+            if t:
+                db.delete(t)
+                db.commit()
+                return True, "Traitement supprimé"
+            return False, "Traitement introuvable"
+        except Exception as e:
+            db.rollback()
+            return False, str(e)
+        finally:
+            db.close()

@@ -1,0 +1,401 @@
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+                               QComboBox, QLineEdit, QPushButton, QDoubleSpinBox,
+                               QLabel, QTableWidget, QTableWidgetItem, QMessageBox,
+                               QTabWidget, QHeaderView, QSpinBox)
+from PySide6.QtCore import QDate, Qt
+from database.db_session import SessionLocal
+from database.models import Eleveur, Vente, FicheCulturale, CoutOperation, PrixVenteProduit
+from controllers.cout_operation_controller import CoutOperationController
+from controllers.prix_vente_produit_controller import PrixVenteProduitController
+
+class GestionEconomiqueWindow(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Gestion économique (coûts et marges)")
+        self.resize(1100, 800)
+        layout = QVBoxLayout(self)
+
+        # Filtre par éleveur et année
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("Éleveur :"))
+        self.code_combo = QComboBox()
+        self.code_combo.setEditable(True)
+        self.code_combo.addItems(self.get_all_codes())
+        self.code_combo.currentTextChanged.connect(self.on_eleveur_changed)
+        filter_layout.addWidget(self.code_combo)
+        filter_layout.addWidget(QLabel("Année :"))
+        self.annee_spin = QSpinBox()
+        self.annee_spin.setRange(2000, 2100)
+        self.annee_spin.setValue(QDate.currentDate().year())
+        self.annee_spin.valueChanged.connect(self.on_annee_changed)
+        filter_layout.addWidget(self.annee_spin)
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
+
+        # Onglets
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
+
+        # Onglet Coûts
+        self.couts_tab = QWidget()
+        self.setup_couts_tab()
+        self.tabs.addTab(self.couts_tab, "💰 Coûts")
+
+        # Onglet Prix de vente
+        self.prix_tab = QWidget()
+        self.setup_prix_tab()
+        self.tabs.addTab(self.prix_tab, "💲 Prix de vente")
+
+        # Onglet Marges
+        self.marges_tab = QWidget()
+        self.setup_marges_tab()
+        self.tabs.addTab(self.marges_tab, "📊 Marges")
+
+        # Bouton Fermer
+        btn_close = QPushButton("Fermer")
+        btn_close.clicked.connect(self.close)
+        layout.addWidget(btn_close, alignment=Qt.AlignRight)
+
+        self.current_cout_id = None
+        self.current_prix_id = None
+        self.on_eleveur_changed()
+
+    def get_all_codes(self):
+        db = SessionLocal()
+        codes = [e.code_elevage for e in db.query(Eleveur).all()]
+        db.close()
+        return codes
+
+    def on_eleveur_changed(self):
+        code = self.code_combo.currentText().strip()
+        annee = str(self.annee_spin.value())
+        self.load_couts(code, annee)
+        self.load_prix(code, annee)
+        self.load_marges(code, annee)
+        self.annuler_cout()
+        self.annuler_prix()
+
+    def on_annee_changed(self):
+        self.on_eleveur_changed()
+
+    # ---------------------- Onglet Coûts ----------------------
+    def setup_couts_tab(self):
+        layout = QVBoxLayout(self.couts_tab)
+
+        form = QFormLayout()
+        self.type_operation = QComboBox()
+        self.type_operation.addItems(["Labour", "Semis", "Engrais de fond", "Engrais couverture", "Désherbage", "Récolte", "Alimentation", "Soins vétérinaires", "Autre"])
+        form.addRow("Type d'opération :", self.type_operation)
+        self.montant = QDoubleSpinBox()
+        self.montant.setRange(0, 1000000)
+        self.montant.setSuffix(" DH")
+        form.addRow("Montant :", self.montant)
+        self.quantite = QLineEdit()
+        self.quantite.setPlaceholderText("Ex: 5 ha, 200 kg...")
+        form.addRow("Quantité (optionnel) :", self.quantite)
+        self.cout_obs = QLineEdit()
+        form.addRow("Observations :", self.cout_obs)
+        layout.addLayout(form)
+
+        btn_layout = QHBoxLayout()
+        self.btn_add_cout = QPushButton("Ajouter")
+        self.btn_add_cout.clicked.connect(self.ajouter_cout)
+        self.btn_modify_cout = QPushButton("Modifier")
+        self.btn_modify_cout.clicked.connect(self.modifier_cout)
+        self.btn_delete_cout = QPushButton("Supprimer")
+        self.btn_delete_cout.clicked.connect(self.supprimer_cout)
+        self.btn_cancel_cout = QPushButton("Annuler")
+        self.btn_cancel_cout.clicked.connect(self.annuler_cout)
+        btn_layout.addWidget(self.btn_add_cout)
+        btn_layout.addWidget(self.btn_modify_cout)
+        btn_layout.addWidget(self.btn_delete_cout)
+        btn_layout.addWidget(self.btn_cancel_cout)
+        layout.addLayout(btn_layout)
+
+        self.table_couts = QTableWidget()
+        self.table_couts.setColumnCount(5)
+        self.table_couts.setHorizontalHeaderLabels(["ID", "Type", "Montant (DH)", "Quantité", "Observations"])
+        self.table_couts.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table_couts.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table_couts.itemSelectionChanged.connect(self.on_cout_selected)
+        layout.addWidget(self.table_couts)
+
+    def load_couts(self, code_elevage, annee):
+        if not code_elevage:
+            self.table_couts.setRowCount(0)
+            return
+        couts = CoutOperationController.get_couts_par_eleveur(code_elevage, annee)
+        self.table_couts.setRowCount(len(couts))
+        for i, c in enumerate(couts):
+            self.table_couts.setItem(i, 0, QTableWidgetItem(str(c.id)))
+            self.table_couts.setItem(i, 1, QTableWidgetItem(c.type_operation))
+            self.table_couts.setItem(i, 2, QTableWidgetItem(f"{c.montant:.2f}"))
+            self.table_couts.setItem(i, 3, QTableWidgetItem(c.quantite or ""))
+            self.table_couts.setItem(i, 4, QTableWidgetItem(c.observations or ""))
+        self.table_couts.resizeColumnsToContents()
+
+    def on_cout_selected(self):
+        row = self.table_couts.currentRow()
+        if row < 0:
+            self.current_cout_id = None
+            return
+        self.current_cout_id = int(self.table_couts.item(row, 0).text())
+        self.type_operation.setCurrentText(self.table_couts.item(row, 1).text())
+        self.montant.setValue(float(self.table_couts.item(row, 2).text()))
+        self.quantite.setText(self.table_couts.item(row, 3).text())
+        self.cout_obs.setText(self.table_couts.item(row, 4).text())
+
+    def annuler_cout(self):
+        self.current_cout_id = None
+        self.type_operation.setCurrentIndex(0)
+        self.montant.setValue(0)
+        self.quantite.clear()
+        self.cout_obs.clear()
+
+    def ajouter_cout(self):
+        code = self.code_combo.currentText().strip()
+        if not code:
+            QMessageBox.warning(self, "Erreur", "Choisissez un élevage.")
+            return
+        data = {
+            'code_elevage': code,
+            'annee': str(self.annee_spin.value()),
+            'type_operation': self.type_operation.currentText(),
+            'montant': self.montant.value(),
+            'quantite': self.quantite.text().strip() or None,
+            'observations': self.cout_obs.text().strip() or None
+        }
+        ok, cid, msg = CoutOperationController.ajouter_cout(data)
+        if ok:
+            QMessageBox.information(self, "Succès", msg)
+            self.on_eleveur_changed()
+            self.annuler_cout()
+        else:
+            QMessageBox.warning(self, "Erreur", msg)
+
+    def modifier_cout(self):
+        if self.current_cout_id is None:
+            QMessageBox.warning(self, "Erreur", "Sélectionnez un coût.")
+            return
+        code = self.code_combo.currentText().strip()
+        if not code:
+            QMessageBox.warning(self, "Erreur", "Élevage non reconnu.")
+            return
+        data = {
+            'type_operation': self.type_operation.currentText(),
+            'montant': self.montant.value(),
+            'quantite': self.quantite.text().strip() or None,
+            'observations': self.cout_obs.text().strip() or None
+        }
+        ok, msg = CoutOperationController.modifier_cout(self.current_cout_id, data)
+        if ok:
+            QMessageBox.information(self, "Succès", msg)
+            self.on_eleveur_changed()
+            self.annuler_cout()
+        else:
+            QMessageBox.warning(self, "Erreur", msg)
+
+    def supprimer_cout(self):
+        if self.current_cout_id is None:
+            QMessageBox.warning(self, "Erreur", "Sélectionnez un coût.")
+            return
+        reply = QMessageBox.question(self, "Confirmation", "Supprimer ce coût ?", QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            ok, msg = CoutOperationController.supprimer_cout(self.current_cout_id)
+            if ok:
+                QMessageBox.information(self, "Succès", msg)
+                self.on_eleveur_changed()
+                self.annuler_cout()
+            else:
+                QMessageBox.warning(self, "Erreur", msg)
+
+    # ---------------------- Onglet Prix de vente ----------------------
+    def setup_prix_tab(self):
+        layout = QVBoxLayout(self.prix_tab)
+
+        form = QFormLayout()
+        self.produit = QComboBox()
+        self.produit.addItems(["Grain", "Paille", "Foin/ensilage", "Viande", "Lait", "Autre"])
+        form.addRow("Produit :", self.produit)
+        self.prix_unitaire = QDoubleSpinBox()
+        self.prix_unitaire.setRange(0, 100000)
+        self.prix_unitaire.setSuffix(" DH/unité")
+        form.addRow("Prix unitaire :", self.prix_unitaire)
+        self.unite = QLineEdit()
+        self.unite.setPlaceholderText("Ex: tonne, kg, litre")
+        form.addRow("Unité :", self.unite)
+        self.prix_obs = QLineEdit()
+        form.addRow("Observations :", self.prix_obs)
+        layout.addLayout(form)
+
+        btn_layout = QHBoxLayout()
+        self.btn_add_prix = QPushButton("Ajouter")
+        self.btn_add_prix.clicked.connect(self.ajouter_prix)
+        self.btn_modify_prix = QPushButton("Modifier")
+        self.btn_modify_prix.clicked.connect(self.modifier_prix)
+        self.btn_delete_prix = QPushButton("Supprimer")
+        self.btn_delete_prix.clicked.connect(self.supprimer_prix)
+        self.btn_cancel_prix = QPushButton("Annuler")
+        self.btn_cancel_prix.clicked.connect(self.annuler_prix)
+        btn_layout.addWidget(self.btn_add_prix)
+        btn_layout.addWidget(self.btn_modify_prix)
+        btn_layout.addWidget(self.btn_delete_prix)
+        btn_layout.addWidget(self.btn_cancel_prix)
+        layout.addLayout(btn_layout)
+
+        self.table_prix = QTableWidget()
+        self.table_prix.setColumnCount(5)
+        self.table_prix.setHorizontalHeaderLabels(["ID", "Produit", "Prix unitaire (DH)", "Unité", "Observations"])
+        self.table_prix.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table_prix.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table_prix.itemSelectionChanged.connect(self.on_prix_selected)
+        layout.addWidget(self.table_prix)
+
+    def load_prix(self, code_elevage, annee):
+        if not code_elevage:
+            self.table_prix.setRowCount(0)
+            return
+        prix = PrixVenteProduitController.get_prix_par_eleveur(code_elevage, annee)
+        self.table_prix.setRowCount(len(prix))
+        for i, p in enumerate(prix):
+            self.table_prix.setItem(i, 0, QTableWidgetItem(str(p.id)))
+            self.table_prix.setItem(i, 1, QTableWidgetItem(p.produit))
+            self.table_prix.setItem(i, 2, QTableWidgetItem(f"{p.prix_unitaire:.2f}"))
+            self.table_prix.setItem(i, 3, QTableWidgetItem(p.unite or ""))
+            self.table_prix.setItem(i, 4, QTableWidgetItem(p.observations or ""))
+        self.table_prix.resizeColumnsToContents()
+
+    def on_prix_selected(self):
+        row = self.table_prix.currentRow()
+        if row < 0:
+            self.current_prix_id = None
+            return
+        self.current_prix_id = int(self.table_prix.item(row, 0).text())
+        self.produit.setCurrentText(self.table_prix.item(row, 1).text())
+        self.prix_unitaire.setValue(float(self.table_prix.item(row, 2).text()))
+        self.unite.setText(self.table_prix.item(row, 3).text())
+        self.prix_obs.setText(self.table_prix.item(row, 4).text())
+
+    def annuler_prix(self):
+        self.current_prix_id = None
+        self.produit.setCurrentIndex(0)
+        self.prix_unitaire.setValue(0)
+        self.unite.clear()
+        self.prix_obs.clear()
+
+    def ajouter_prix(self):
+        code = self.code_combo.currentText().strip()
+        if not code:
+            QMessageBox.warning(self, "Erreur", "Choisissez un élevage.")
+            return
+        data = {
+            'code_elevage': code,
+            'annee': str(self.annee_spin.value()),
+            'produit': self.produit.currentText(),
+            'prix_unitaire': self.prix_unitaire.value(),
+            'unite': self.unite.text().strip() or None,
+            'observations': self.prix_obs.text().strip() or None
+        }
+        ok, pid, msg = PrixVenteProduitController.ajouter_prix(data)
+        if ok:
+            QMessageBox.information(self, "Succès", msg)
+            self.on_eleveur_changed()
+            self.annuler_prix()
+        else:
+            QMessageBox.warning(self, "Erreur", msg)
+
+    def modifier_prix(self):
+        if self.current_prix_id is None:
+            QMessageBox.warning(self, "Erreur", "Sélectionnez un prix.")
+            return
+        code = self.code_combo.currentText().strip()
+        if not code:
+            QMessageBox.warning(self, "Erreur", "Élevage non reconnu.")
+            return
+        data = {
+            'produit': self.produit.currentText(),
+            'prix_unitaire': self.prix_unitaire.value(),
+            'unite': self.unite.text().strip() or None,
+            'observations': self.prix_obs.text().strip() or None
+        }
+        ok, msg = PrixVenteProduitController.modifier_prix(self.current_prix_id, data)
+        if ok:
+            QMessageBox.information(self, "Succès", msg)
+            self.on_eleveur_changed()
+            self.annuler_prix()
+        else:
+            QMessageBox.warning(self, "Erreur", msg)
+
+    def supprimer_prix(self):
+        if self.current_prix_id is None:
+            QMessageBox.warning(self, "Erreur", "Sélectionnez un prix.")
+            return
+        reply = QMessageBox.question(self, "Confirmation", "Supprimer ce prix ?", QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            ok, msg = PrixVenteProduitController.supprimer_prix(self.current_prix_id)
+            if ok:
+                QMessageBox.information(self, "Succès", msg)
+                self.on_eleveur_changed()
+                self.annuler_prix()
+            else:
+                QMessageBox.warning(self, "Erreur", msg)
+
+    # ---------------------- Onglet Marges ----------------------
+    def setup_marges_tab(self):
+        layout = QVBoxLayout(self.marges_tab)
+        self.marges_text = QLabel()
+        self.marges_text.setWordWrap(True)
+        self.marges_text.setStyleSheet("font-family: monospace; background-color: #f5f5f5; padding: 10px;")
+        layout.addWidget(self.marges_text)
+
+    def load_marges(self, code_elevage, annee):
+        if not code_elevage:
+            self.marges_text.setText("Aucun élevage sélectionné.")
+            return
+        db = SessionLocal()
+        # Récupérer les coûts totaux par type
+        couts_par_type = CoutOperationController.get_couts_par_type(code_elevage, annee)
+        total_couts = sum(c[1] for c in couts_par_type)
+        # Récupérer les ventes de l'année
+        ventes = db.query(Vente).filter(
+            Vente.code_elevage == code_elevage,
+            Vente.date_vente.like(f"{annee}%")
+        ).all()
+        total_ventes = sum(v.prix_vente for v in ventes)
+        # Récupérer les rendements des cultures
+        fiches = db.query(FicheCulturale).filter(FicheCulturale.annee == annee).all()
+        quantites_produites = {}
+        for f in fiches:
+            if f.rendement_grain:
+                quantites_produites['Grain'] = quantites_produites.get('Grain', 0) + f.rendement_grain
+            if f.rendement_paille:
+                quantites_produites['Paille'] = quantites_produites.get('Paille', 0) + f.rendement_paille
+            if f.rendement_foin:
+                quantites_produites['Foin/ensilage'] = quantites_produites.get('Foin/ensilage', 0) + f.rendement_foin
+        # Récupérer les prix unitaires
+        prix_produits = {p.produit: p.prix_unitaire for p in PrixVenteProduitController.get_prix_par_eleveur(code_elevage, annee)}
+        # Valeur estimée des récoltes
+        valeur_recoltes = 0
+        for produit, qte in quantites_produites.items():
+            prix = prix_produits.get(produit, 0)
+            valeur_recoltes += qte * prix
+        total_produit = total_ventes + valeur_recoltes
+        marge_brute = total_produit - total_couts
+        texte = f"""
+        ===== SYNTHÈSE ÉCONOMIQUE - {code_elevage} - Année {annee} =====
+
+        📊 PRODUITS :
+        - Ventes enregistrées : {total_ventes:,.2f} DH
+        - Valeur estimée des récoltes (non vendues) : {valeur_recoltes:,.2f} DH
+        - TOTAL PRODUITS : {total_produit:,.2f} DH
+
+        💸 CHARGES :
+        """
+        for type_op, montant in couts_par_type:
+            texte += f"\n   - {type_op} : {montant:,.2f} DH"
+        texte += f"\n   - TOTAL CHARGES : {total_couts:,.2f} DH"
+        texte += f"\n\n📈 MARGE BRUTE : {marge_brute:,.2f} DH"
+        if total_couts > 0:
+            texte += f"\n   (Ratio produit/charge : {total_produit/total_couts:.2f})"
+        db.close()
+        self.marges_text.setText(texte)

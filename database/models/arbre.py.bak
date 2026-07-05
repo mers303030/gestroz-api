@@ -1,0 +1,12 @@
+from sqlalchemy import Column, Integer, String, Float
+from database.db_session import Base
+
+class Arbre(Base):
+    __tablename__ = 'arbres'
+    id = Column(Integer, primary_key=True)
+    code_elevage = Column(String, nullable=False)
+    parcelle_id = Column(Integer, nullable=True)       # optionnel, lien vers une parcelle
+    nom_arbre = Column(String, nullable=False)        # Olivier, Amandier, Figuier, etc.
+    nombre_arbres = Column(Integer, nullable=False)
+    destination = Column(String, nullable=True)       # Autoconsommation, Vente
+    observations = Column(String, nullable=True)

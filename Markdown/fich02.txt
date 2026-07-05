@@ -1,0 +1,47 @@
+
+## Lancement
+
+- `run.bat` : `@echo off` / `chcp 65001` / `cd /d S:\python-project\zaer` / `python main.py` / `exit`
+- `main.py` : style Fusion, palette personnalisée pour lisibilité des menus, import de `LoginWindow` et `MainWindow`.
+
+## Fonctionnalités principales
+
+- **Authentification** (login)
+- **Gestion des éleveurs** (CRUD, recherche par code, tri, double‑clic pour modifier)
+- **Gestion des animaux** (CRUD, filtre par éleveur)
+- **Gestion des naissances, sevrages, croissances, mortalités, ventes, stocks** (fenêtres prévues, certaines à finaliser)
+- **Tableau de bord (dashboard)** avec 6 onglets : Éleveurs, Élevages, Zootechnie, Performances, Commerce, Stocks
+- **Export CSV** des données affichées (via bouton dans le dashboard)
+- **Import Excel** (éleveurs, animaux)
+- **Sauvegarde** de la base SQLite
+
+## Styles adoptés
+
+- **Tableaux** : en‑têtes gris clair (`#F3F4F6`), lignes alternées blanc/gris très clair, sélection bleue (`#E3F2FD`)
+- **Menus** : fond gris clair (`#f0f2f5`), texte noir, survol rouge acajou (`#8B3A3A`)
+- **Fenêtres de gestion** : héritent du style par défaut de PySide6 (pas de `setStyleSheet` personnalisé pour éviter les conflits)
+
+## Problèmes connus (à corriger)
+
+- Certains onglets du dashboard (Élevages, Performances, Commerce, Stocks) affichent encore des données factices. Ils doivent être reliés aux vraies tables SQLAlchemy.
+- La colonne `stock_kg` doit être ajoutée dans `Aliment` pour que l’onglet Stocks fonctionne.
+- Les fenêtres de gestion des naissances, sevrages, etc. ne sont pas toutes finalisées.
+- Le fichier `database/models/__init__.py` doit exporter tous les modèles pour éviter les erreurs d’import.
+
+## Conseils pour la suite
+
+1. **Restaurer une version stable** (si vous avez une sauvegarde antérieure aux modifications des 48 dernières heures).
+2. **Traiter un seul problème à la fois** : d’abord le dashboard avec données réelles, puis les fenêtres manquantes.
+3. **Utiliser `git`** pour pouvoir revenir en arrière facilement.
+4. **Pour le dashboard**, repartir du fichier `dashboard_tables.py` qui contient les requêtes SQLAlchemy (sans surcharger de styles) et ajouter l’onglet Stocks en lisant `Aliment.stock_kg`.
+
+## Fichiers clés à conserver (versions stables)
+
+- `ui/widgets/dashboard_tables.py` (version avec `load_real_data` et export)
+- `ui/windows/main_window.py` (version avec tous les menus mais imports sécurisés)
+- `ui/windows/gestion_eleveurs.py` (avec recherche et tri)
+- `ui/windows/gestion_animaux.py` (avec filtre par éleveur)
+
+---
+
+*Document généré le 2026-06-07. Sauvegardez‑le pour mémoire.*
