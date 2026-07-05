@@ -1,122 +1,42 @@
 import os
-from fastapi import FastAPI, HTTPException, status
+import sqlite3
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import libsql_experimental as libsql
 
-app = FastAPI(title="Gestroz API", version="1.0.0")
+app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-# Configuration CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, "data", "zaer.db")
 
-# Configuration de la Base de Données Turso
-TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
-TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-def get_db_connection():
-    if TURSO_URL and TURSO_TOKEN and not TURSO_URL.startswith("file:"):
-        return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
-    else:
-        os.makedirs("data", exist_ok=True)
-        return libsql.connect(database="data/zaer.db")
-
-class LoginRequest(BaseModel):
-    code_elevage: str
-    mot_de_passe: str
-
-class UpdatePasswordRequest(BaseModel):
-    code_elevage: str
-    current_password: str
-    new_password: str
-
-# ---------- ROUTE POUR L'INTERFACE GRAPHIQUE ----------
 @app.get("/")
 async def serve_ui():
-    static_file_path = os.path.join(os.path.dirname(__file__), "static", "interface.html")
-    if os.path.exists(static_file_path):
-        return FileResponse(static_file_path)
-    return {"message": "Serveur opérationnel. Interface HTML introuvable dans api/static/."}
+    path = os.path.join(os.path.dirname(__file__), "static", "interface.html")
+    if os.path.exists(path):
+        return FileResponse(path)
+    return {"error": "interface.html not found"}
 
-# ---------- ROUTES DE DIAGNOSTIC ----------
 @app.get("/health")
-@app.get("/api/health")
-async def health_check():
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM eleveurs;")
-        count = cursor.fetchone()[0]
-        conn.close()
-        mode = "Turso Cloud" if (TURSO_URL and TURSO_TOKEN) else "Local SQLite"
-        return {
-            "status": "healthy",
-            "database_mode": mode,
-            "total_eleveurs": count
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Échec de connexion à la base de données : {str(e)}"
-        )
+async def health():
+    conn = get_db()
+    count = conn.execute("SELECT COUNT(*) FROM eleveurs").fetchone()[0]
+    conn.close()
+    return {"status": "healthy", "total_eleveurs": count}
 
-# ---------- ROUTES APPLICATIVES ----------
 @app.post("/api/login")
-async def login(payload: LoginRequest):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT mot_de_passe FROM eleveurs WHERE code_elevage = ?;",
-            (payload.code_elevage,)
-        )
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row and row[0] == payload.mot_de_passe:
-            return {"success": True, "message": "Connexion approuvée"}
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Code élevage ou mot de passe incorrect"
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/update-password")
-async def update_password(payload: UpdatePasswordRequest):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT mot_de_passe FROM eleveurs WHERE code_elevage = ?;",
-            (payload.code_elevage,)
-        )
-        row = cursor.fetchone()
-        
-        if not row or row[0] != payload.current_password:
-            conn.close()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Le mot de passe actuel est invalide"
-            )
-        
-        cursor.execute(
-            "UPDATE eleveurs SET mot_de_passe = ? WHERE code_elevage = ?;",
-            (payload.new_password, payload.code_elevage)
-        )
-        conn.commit()
-        conn.close()
-        
-        return {"success": True, "message": "Mot de passe mis à jour avec succès"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def login(payload: dict):
+    code = payload.get("code_elevage")
+    mdp = payload.get("mot_de_passe")
+    conn = get_db()
+    row = conn.execute("SELECT mot_de_passe FROM eleveurs WHERE code_elevage = ?", (code,)).fetchone()
+    conn.close()
+    if row and row[0] == mdp:
+        return {"success": True}
+    raise HTTPException(status_code=401, detail="Identifiants incorrects")
