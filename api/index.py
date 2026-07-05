@@ -14,11 +14,13 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "change_this_in_production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
+TURSO_HTTP_URL = os.environ.get("TURSO_HTTP_URL")
 TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
-if not TURSO_URL or not TURSO_TOKEN:
-    raise Exception("Variables d'environnement TURSO manquantes")
+if not TURSO_HTTP_URL:
+    raise Exception("Variable TURSO_HTTP_URL manquante")
+if not TURSO_TOKEN:
+    raise Exception("Variable TURSO_AUTH_TOKEN manquante")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(BASE_DIR, "api", "static")
@@ -41,9 +43,10 @@ async def turso_query(sql: str, params: list = []):
     """Exécute une requête SQL sur Turso via l'API HTTP."""
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{TURSO_URL}/v1/query",
+            f"{TURSO_HTTP_URL}/v1/query",
             json={"statements": [{"sql": sql, "args": params}]},
-            headers={"Authorization": f"Bearer {TURSO_TOKEN}"}
+            headers={"Authorization": f"Bearer {TURSO_TOKEN}"},
+            timeout=30.0
         )
         response.raise_for_status()
         return response.json()
@@ -72,7 +75,6 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 @app.on_event("startup")
 async def startup():
     try:
-        # Créer la table eleveurs si elle n'existe pas
         await turso_query("""
             CREATE TABLE IF NOT EXISTS eleveurs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,7 +84,6 @@ async def startup():
         """)
         print("✅ Table 'eleveurs' vérifiée")
         
-        # Ajouter admin/admin si absent
         result = await turso_query(
             "SELECT COUNT(*) FROM eleveurs WHERE code_elevage = ?",
             ["admin"]
@@ -141,7 +142,6 @@ async def change_password(request: Request, username: str = Depends(verify_token
         return JSONResponse(status_code=400, content={"error": "JSON invalide"})
     
     try:
-        # Vérifier l'ancien mot de passe
         result = await turso_query(
             "SELECT mot_de_passe_hash FROM eleveurs WHERE code_elevage = ?",
             [username]
@@ -151,7 +151,6 @@ async def change_password(request: Request, username: str = Depends(verify_token
         if not rows or rows[0][0] != hash_password(old_password):
             return JSONResponse(status_code=401, content={"error": "Ancien mot de passe incorrect"})
         
-        # Mettre à jour le mot de passe
         new_hash = hash_password(new_password)
         await turso_query(
             "UPDATE eleveurs SET mot_de_passe_hash = ? WHERE code_elevage = ?",
@@ -164,7 +163,6 @@ async def change_password(request: Request, username: str = Depends(verify_token
 @app.get("/health")
 async def health():
     try:
-        # Test de la connexion à Turso
         await turso_query("SELECT 1")
         return {"status": "healthy", "turso": "connected"}
     except Exception as e:
