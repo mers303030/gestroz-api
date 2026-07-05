@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import libsql_experimental as libsql
@@ -25,10 +25,8 @@ def get_db_connection():
     ou SQLite local en fallback pour le développement.
     """
     if TURSO_URL and TURSO_TOKEN and not TURSO_URL.startswith("file:"):
-        # Mode Production : Connexion distante à Turso
         return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
     else:
-        # Mode Local : Utilisation du fichier zaer.db local
         os.makedirs("data", exist_ok=True)
         return libsql.connect(database="data/zaer.db")
 
@@ -43,17 +41,36 @@ class UpdatePasswordRequest(BaseModel):
     new_password: str
 
 # ----------------------------------------------------------------
-# ROUTES DE DIAGNOSTIC (HEALTH CHECK)
+# MIDDLEWARE DE ROUTAGE (Anti-404 Vercel)
+# ----------------------------------------------------------------
+@app.middleware("http")
+async def clean_vercel_routing_prefix(request: Request, call_next):
+    """
+    Vercel réécrit parfois les requêtes en ajoutant /api ou /api/index.py.
+    Ce middleware nettoie le chemin à la volée pour que FastAPI s'y retrouve toujours.
+    """
+    path = request.url.path
+    if path.startswith("/api/index.py"):
+        request.scope["path"] = path.replace("/api/index.py", "")
+    elif path.startswith("/api"):
+        request.scope["path"] = path.replace("/api", "")
+        
+    # Sécurité supplémentaire : s'assurer qu'un chemin vide pointe bien sur la racine
+    if not request.scope["path"]:
+        request.scope["path"] = "/"
+        
+    return await call_next(request)
+
+# ----------------------------------------------------------------
+# ROUTES APPLICATIVES (Accessibles avec ou sans préfixe /api)
 # ----------------------------------------------------------------
 
 @app.get("/health")
-@app.get("/api/health")
 async def health_check():
     """Route de diagnostic pour valider la chaîne de connexion Turso"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # On vérifie la présence et le volume de la table éleveurs
         cursor.execute("SELECT COUNT(*) FROM eleveurs;")
         count = cursor.fetchone()[0]
         conn.close()
@@ -70,11 +87,7 @@ async def health_check():
             detail=f"Échec de connexion à la base de données : {str(e)}"
         )
 
-# ----------------------------------------------------------------
-# ROUTES APPLICATIVES (ÉLEVEURS)
-# ----------------------------------------------------------------
-
-@app.post("/api/login")
+@app.post("/login")
 async def login(payload: LoginRequest):
     """Vérification des identifiants d'un éleveur"""
     try:
@@ -99,7 +112,7 @@ async def login(payload: LoginRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/update-password")
+@app.post("/update-password")
 async def update_password(payload: UpdatePasswordRequest):
     """Garantit la persistance des modifications de mots de passe sur Turso"""
     try:
