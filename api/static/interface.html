@@ -92,10 +92,7 @@
                 if (response.ok) {
                     messageDiv.style.color = '#2ecc71';
                     messageDiv.textContent = '✅ Connexion réussie !';
-                    // Stocke le token pour les futures requêtes
                     localStorage.setItem('token', data.token);
-                    // Redirige vers le tableau de bord si besoin
-                    // window.location.href = '/dashboard';
                 } else {
                     messageDiv.style.color = '#e74c3c';
                     messageDiv.textContent = '❌ ' + (data.error || 'Erreur de connexion');

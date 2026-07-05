@@ -2,19 +2,12 @@ import os
 import hashlib
 import jwt
 import datetime
+import httpx
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from mangum import Mangum
-
-# Correction : utiliser libsql-experimental
-try:
-    from libsql_experimental import create_client
-except ImportError:
-    # Fallback si le package n'est pas disponible
-    create_client = None
-    print("⚠️ libsql-experimental non disponible")
 
 # ---------- CONFIG ----------
 SECRET_KEY = os.environ.get("SECRET_KEY", "change_this_in_production")
@@ -23,6 +16,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
 TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+
+if not TURSO_URL or not TURSO_TOKEN:
+    raise Exception("Variables d'environnement TURSO manquantes")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(BASE_DIR, "api", "static")
@@ -39,6 +35,18 @@ app.add_middleware(
 )
 
 security = HTTPBearer()
+
+# ---------- TURSO VIA HTTPX ----------
+async def turso_query(sql: str, params: list = []):
+    """Exécute une requête SQL sur Turso via l'API HTTP."""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{TURSO_URL}/v1/query",
+            json={"statements": [{"sql": sql, "args": params}]},
+            headers={"Authorization": f"Bearer {TURSO_TOKEN}"}
+        )
+        response.raise_for_status()
+        return response.json()
 
 # ---------- HASH ----------
 def hash_password(password):
@@ -60,6 +68,36 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token invalide")
 
+# ---------- INIT ----------
+@app.on_event("startup")
+async def startup():
+    try:
+        # Créer la table eleveurs si elle n'existe pas
+        await turso_query("""
+            CREATE TABLE IF NOT EXISTS eleveurs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code_elevage TEXT UNIQUE NOT NULL,
+                mot_de_passe_hash TEXT NOT NULL
+            )
+        """)
+        print("✅ Table 'eleveurs' vérifiée")
+        
+        # Ajouter admin/admin si absent
+        result = await turso_query(
+            "SELECT COUNT(*) FROM eleveurs WHERE code_elevage = ?",
+            ["admin"]
+        )
+        count = result["results"][0]["rows"][0][0]
+        if count == 0:
+            admin_hash = hash_password("admin")
+            await turso_query(
+                "INSERT INTO eleveurs (code_elevage, mot_de_passe_hash) VALUES (?, ?)",
+                ["admin", admin_hash]
+            )
+            print("✅ Compte 'admin' créé")
+    except Exception as e:
+        print(f"⚠️ Erreur startup : {e}")
+
 # ---------- ROUTES ----------
 @app.get("/")
 @app.get("/interface.html")
@@ -78,15 +116,20 @@ async def login_post(request: Request):
     except:
         return JSONResponse(status_code=400, content={"error": "JSON invalide"})
     
-    # Version simplifiée sans Turso (admin/admin et OLM001/OLM001)
-    if username == "admin" and password == "admin":
-        token = create_token(username)
-        return {"token": token, "message": "Connexion réussie"}
-    elif username == "OLM001" and password == "OLM001":
-        token = create_token(username)
-        return {"token": token, "message": "Connexion réussie"}
-    else:
-        return JSONResponse(status_code=401, content={"error": "Identifiants incorrects"})
+    try:
+        result = await turso_query(
+            "SELECT mot_de_passe_hash FROM eleveurs WHERE code_elevage = ?",
+            [username]
+        )
+        rows = result["results"][0]["rows"]
+        
+        if rows and rows[0][0] == hash_password(password):
+            token = create_token(username)
+            return {"token": token, "message": "Connexion réussie"}
+        else:
+            return JSONResponse(status_code=401, content={"error": "Identifiants incorrects"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Erreur base de données: {str(e)}"})
 
 @app.post("/change-password")
 async def change_password(request: Request, username: str = Depends(verify_token)):
@@ -97,16 +140,34 @@ async def change_password(request: Request, username: str = Depends(verify_token
     except:
         return JSONResponse(status_code=400, content={"error": "JSON invalide"})
     
-    # Version simplifiée pour admin
-    if username == "admin" and old_password == "admin":
+    try:
+        # Vérifier l'ancien mot de passe
+        result = await turso_query(
+            "SELECT mot_de_passe_hash FROM eleveurs WHERE code_elevage = ?",
+            [username]
+        )
+        rows = result["results"][0]["rows"]
+        
+        if not rows or rows[0][0] != hash_password(old_password):
+            return JSONResponse(status_code=401, content={"error": "Ancien mot de passe incorrect"})
+        
+        # Mettre à jour le mot de passe
+        new_hash = hash_password(new_password)
+        await turso_query(
+            "UPDATE eleveurs SET mot_de_passe_hash = ? WHERE code_elevage = ?",
+            [new_hash, username]
+        )
         return {"message": "Mot de passe mis à jour avec succès"}
-    elif username == "OLM001" and old_password == "OLM001":
-        return {"message": "Mot de passe mis à jour avec succès (simulé)"}
-    else:
-        return JSONResponse(status_code=401, content={"error": "Ancien mot de passe incorrect"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Erreur base de données: {str(e)}"})
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    try:
+        # Test de la connexion à Turso
+        await turso_query("SELECT 1")
+        return {"status": "healthy", "turso": "connected"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "unhealthy", "turso": "disconnected", "error": str(e)})
 
 handler = Mangum(app)
