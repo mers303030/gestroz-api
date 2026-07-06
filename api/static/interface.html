@@ -1,132 +1,110 @@
-import os
-from fastapi import FastAPI, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-import libsql_experimental as libsql
-
-app = FastAPI(title="Gestroz API", version="1.0.0")
-
-# Configuration CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Configuration de la Base de Données Turso
-TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
-TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
-
-def get_db_connection():
-    if TURSO_URL and TURSO_TOKEN and not TURSO_URL.startswith("file:"):
-        return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
-    else:
-        os.makedirs("data", exist_ok=True)
-        return libsql.connect(database="data/zaer.db")
-
-class LoginRequest(BaseModel):
-    code_elevage: str
-    mot_de_passe: str
-
-class UpdatePasswordRequest(BaseModel):
-    code_elevage: str
-    current_password: str
-    new_password: str
-
-# ----------------------------------------------------------------
-# ROUTE POUR L'INTERFACE GRAPHIQUE (Statique)
-# ----------------------------------------------------------------
-
-@app.get("/")
-async def serve_ui():
-    """Sert le fichier HTML de l'interface situé dans api/static/"""
-    static_file_path = os.path.join(os.path.dirname(__file__), "static", "interface.html")
-    if os.path.exists(static_file_path):
-        return FileResponse(static_file_path)
-    return {"message": "Serveur opérationnel. Interface HTML introuvable dans api/static/."}
-
-# ----------------------------------------------------------------
-# ROUTES DE DIAGNOSTIC & APPLICATIVES
-# ----------------------------------------------------------------
-
-@app.get("/health")
-@app.get("/api/health")
-async def health_check():
-    """Route de diagnostic globale"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM eleveurs;")
-        count = cursor.fetchone()[0]
-        conn.close()
-        
-        mode = "Turso Cloud" if (TURSO_URL and TURSO_TOKEN) else "Local SQLite"
-        return {
-            "status": "healthy",
-            "database_mode": mode,
-            "total_eleveurs": count
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestroz - Connexion</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 400px;
+            margin: 100px auto;
+            padding: 20px;
+            background: #f5f5f5;
         }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Échec de connexion à la base de données : {str(e)}"
-        )
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { text-align: center; color: #333; }
+        .subtitle { text-align: center; color: #666; font-size: 14px; margin-bottom: 20px; }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background: #0070f3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover { background: #0050b3; }
+        #message {
+            margin-top: 15px;
+            text-align: center;
+            color: #666;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: #0070f3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🐄 Gestroz</h1>
+        <div class="subtitle">Gestion des éleveurs ROZ</div>
+        
+        <input type="text" id="code" placeholder="Code élevage" value="test123">
+        <input type="password" id="pass" placeholder="Mot de passe" value="password">
+        <button onclick="login()">Se connecter</button>
+        
+        <div id="message"></div>
+        
+        <p style="text-align:center;margin-top:20px;font-size:12px;color:#999;">
+            Première connexion ? Changez votre mot de passe après connexion.
+        </p>
+    </div>
 
-@app.post("/api/login")
-async def login(payload: LoginRequest):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT mot_de_passe FROM eleveurs WHERE code_elevage = ?;", 
-            (payload.code_elevage,)
-        )
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row and row[0] == payload.mot_de_passe:
-            return {"success": True, "message": "Connexion approuvée"}
+    <script>
+        async function login() {
+            const code = document.getElementById('code').value;
+            const pass = document.getElementById('pass').value;
+            const msg = document.getElementById('message');
             
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Code élevage ou mot de passe incorrect"
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/update-password")
-async def update_password(payload: UpdatePasswordRequest):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            "SELECT mot_de_passe FROM eleveurs WHERE code_elevage = ?;", 
-            (payload.code_elevage,)
-        )
-        row = cursor.fetchone()
-        
-        if not row or row[0] != payload.current_password:
-            conn.close()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Le mot de passe actuel est invalide"
-            )
+            msg.textContent = 'Connexion en cours...';
+            msg.className = 'info';
             
-        cursor.execute(
-            "UPDATE eleveurs SET mot_de_passe = ? WHERE code_elevage = ?;",
-            (payload.new_password, payload.code_elevage)
-        )
-        conn.commit()
-        conn.close()
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code_elevage: code, mot_de_passe: pass })
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    msg.textContent = '✅ Bienvenue dans Gestroz ! Redirection...';
+                    msg.className = 'success';
+                    setTimeout(() => {
+                        window.location.href = '/dashboard';
+                    }, 2000);
+                } else {
+                    msg.textContent = '❌ ' + (data.detail || 'Erreur de connexion');
+                    msg.className = 'error';
+                }
+            } catch (err) {
+                msg.textContent = '❌ Erreur réseau';
+                msg.className = 'error';
+            }
+        }
         
-        return {"success": True, "message": "Mot de passe mis à jour avec succès"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        // Permet de valider avec la touche Entrée
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+    </script>
+</body>
+</html>
